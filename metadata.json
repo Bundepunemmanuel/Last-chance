@@ -1,0 +1,6 @@
+{
+  "name": "LAST CHANCE",
+  "description": "A 3D precision platformer set in an abandoned research facility with deceptive traps, offline local saves, and mobile touch controls.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
