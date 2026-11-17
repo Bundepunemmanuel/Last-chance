@@ -60,7 +60,9 @@ export interface LevelInstance {
   hazardColliderHandles: Set<number>;
   collapsingColliderMap: Map<number, CollapsingPlatform>;
   sisterRig: SisterRig;
+  introSisterRig: SisterRig;
   emergencyLights: THREE.PointLight[];
+  updateAmbient: (dt: number) => void;
   update: (
     dt: number,
     elapsed: number,
@@ -94,25 +96,34 @@ export function buildSectorOneLevel(
     return m;
   };
 
-  // Shared calibrated PBR materials
+  // Shared calibrated PBR materials (with bump + roughness maps)
   const concreteMat = trackMat(
     new THREE.MeshStandardMaterial({
       map: textures.concreteColor,
       roughnessMap: textures.concreteRoughness,
+      bumpMap: textures.concreteBump,
+      bumpScale: 0.045,
       roughness: 0.88,
       metalness: 0.05,
     }),
   );
   const darkSteelMat = trackMat(
     new THREE.MeshStandardMaterial({
-      color: 0x2b313a,
-      roughness: 0.42,
-      metalness: 0.78,
+      color: 0x262d37,
+      roughness: 0.4,
+      metalness: 0.82,
+    }),
+  );
+  const chromeMat = trackMat(
+    new THREE.MeshStandardMaterial({
+      color: 0xe2e8f0,
+      roughness: 0.16,
+      metalness: 0.94,
     }),
   );
   const rustBeamMat = trackMat(
     new THREE.MeshStandardMaterial({
-      color: 0x5c3624,
+      color: 0x623925,
       roughness: 0.72,
       metalness: 0.48,
     }),
@@ -120,27 +131,71 @@ export function buildSectorOneLevel(
   const wallMat = trackMat(
     new THREE.MeshStandardMaterial({
       map: textures.wallPanelColor,
-      roughness: 0.78,
-      metalness: 0.18,
+      bumpMap: textures.wallPanelBump,
+      bumpScale: 0.06,
+      roughness: 0.76,
+      metalness: 0.2,
     }),
   );
   const gratingMat = trackMat(
     new THREE.MeshStandardMaterial({
       map: textures.gratingColor,
-      roughness: 0.5,
-      metalness: 0.65,
+      roughness: 0.48,
+      metalness: 0.68,
     }),
   );
   const hazardMat = trackMat(
     new THREE.MeshStandardMaterial({
       map: textures.hazardStripeColor,
-      roughness: 0.55,
+      roughness: 0.52,
       metalness: 0.25,
+    }),
+  );
+  const drumMat = trackMat(
+    new THREE.MeshStandardMaterial({
+      map: textures.drumColor,
+      roughness: 0.6,
+      metalness: 0.45,
+    }),
+  );
+  const terminalScreenMat = trackMat(
+    new THREE.MeshStandardMaterial({
+      map: textures.terminalScreenColor,
+      emissiveMap: textures.terminalScreenColor,
+      emissive: 0xffffff,
+      emissiveIntensity: 0.95,
+      roughness: 0.25,
+      metalness: 0.1,
+    }),
+  );
+  const glassMat = trackMat(
+    new THREE.MeshStandardMaterial({
+      color: 0xbae6fd,
+      transparent: true,
+      opacity: 0.26,
+      roughness: 0.12,
+      metalness: 0.15,
+      depthWrite: false,
+    }),
+  );
+  const fluoroMat = trackMat(
+    new THREE.MeshStandardMaterial({
+      color: 0xf8fafc,
+      emissive: 0xcfe8ff,
+      emissiveIntensity: 2.1,
+      roughness: 0.2,
+    }),
+  );
+  const cableMat = trackMat(
+    new THREE.MeshStandardMaterial({
+      color: 0x16191e,
+      roughness: 0.85,
+      metalness: 0.12,
     }),
   );
   const spikeSteelMat = trackMat(
     new THREE.MeshStandardMaterial({
-      color: 0xcbd5e1,
+      color: 0xdbe4ee,
       roughness: 0.2,
       metalness: 0.92,
     }),
@@ -191,12 +246,89 @@ export function buildSectorOneLevel(
   addStaticPlatform(0, 0, -0.25, 6.2, 1.2, 9.5, concreteMat, true);
 
   // Back containment bulkhead wall behind spawn
-  const backWall = new THREE.Mesh(trackGeo(new THREE.BoxGeometry(7.2, 5.2, 0.6)), wallMat);
-  backWall.position.set(0, 2.4, 4.8);
+  const backWall = new THREE.Mesh(trackGeo(new THREE.BoxGeometry(7.6, 5.4, 0.65)), wallMat);
+  backWall.position.set(0, 2.5, 4.8);
   backWall.receiveShadow = true;
   group.add(backWall);
-  const backBody = world.createRigidBody(rapier.RigidBodyDesc.fixed().setTranslation(0, 2.4, 4.8));
-  world.createCollider(rapier.ColliderDesc.cuboid(3.6, 2.6, 0.3), backBody);
+  const backBody = world.createRigidBody(rapier.RigidBodyDesc.fixed().setTranslation(0, 2.5, 4.8));
+  world.createCollider(rapier.ColliderDesc.cuboid(3.8, 2.7, 0.32), backBody);
+
+  // Entry Containment Observation Chamber on Left (-X) showing Sister right at start!
+  const obsFloor = new THREE.Mesh(trackGeo(new THREE.BoxGeometry(3.2, 1.0, 4.2)), concreteMat);
+  obsFloor.position.set(-4.8, -0.25, -1.6);
+  obsFloor.receiveShadow = true;
+  group.add(obsFloor);
+
+  const obsBackWall = new THREE.Mesh(trackGeo(new THREE.BoxGeometry(0.4, 4.4, 4.4)), wallMat);
+  obsBackWall.position.set(-6.3, 2.2, -1.6);
+  group.add(obsBackWall);
+  for (const wz of [-3.7, 0.5]) {
+    const sideW = new THREE.Mesh(trackGeo(new THREE.BoxGeometry(3.2, 4.4, 0.35)), wallMat);
+    sideW.position.set(-4.8, 2.2, wz);
+    group.add(sideW);
+  }
+  const obsRoof = new THREE.Mesh(trackGeo(new THREE.BoxGeometry(3.5, 0.4, 4.4)), darkSteelMat);
+  obsRoof.position.set(-4.8, 4.3, -1.6);
+  group.add(obsRoof);
+
+  // Observation Reinforced Glass + Steel Mullions + Invisible Physics Barrier at x = -3.15
+  const obsLedge = new THREE.Mesh(trackGeo(new THREE.BoxGeometry(0.32, 0.95, 4.1)), darkSteelMat);
+  obsLedge.position.set(-3.15, 0.47, -1.6);
+  group.add(obsLedge);
+
+  const obsGlass = new THREE.Mesh(trackGeo(new THREE.PlaneGeometry(3.75, 2.65)), glassMat);
+  obsGlass.rotation.y = Math.PI / 2;
+  obsGlass.position.set(-3.15, 2.25, -1.6);
+  group.add(obsGlass);
+
+  for (const mz of [-2.8, -1.6, -0.4]) {
+    const mullion = new THREE.Mesh(trackGeo(new THREE.BoxGeometry(0.1, 2.7, 0.1)), darkSteelMat);
+    mullion.position.set(-3.14, 2.25, mz);
+    group.add(mullion);
+  }
+
+  // Physics barrier along the observation bay edge so player can walk right up to the glass
+  const obsBarrierBody = world.createRigidBody(rapier.RigidBodyDesc.fixed().setTranslation(-3.15, 1.8, -1.6));
+  world.createCollider(rapier.ColliderDesc.cuboid(0.2, 1.8, 2.1), obsBarrierBody);
+
+  // Motorized Steel Blast Shutter (drops down ~5s into run or past z=-4.0)
+  const blastShutter = new THREE.Mesh(trackGeo(new THREE.BoxGeometry(0.14, 2.7, 3.8)), wallMat);
+  const shutterOpenY = 5.05;
+  const shutterClosedY = 2.25;
+  blastShutter.position.set(-3.26, shutterOpenY, -1.6);
+  group.add(blastShutter);
+
+  const obsLight = new THREE.PointLight(0x38bdf8, 2.4, 8, 2);
+  obsLight.position.set(-4.7, 3.6, -1.6);
+  group.add(obsLight);
+  emergencyLights.push(obsLight);
+
+  const introSisterRig = createSisterModel();
+  introSisterRig.root.position.set(-4.65, 0.25, -1.6);
+  introSisterRig.root.rotation.y = Math.PI * 0.36; // Turned toward spawn & walkway
+  group.add(introSisterRig.root);
+
+  // Biohazard Drums beside Back Wall & Observation Bay
+  const drumGeo = trackGeo(new THREE.CylinderGeometry(0.32, 0.32, 0.92, 12));
+  const drumRimGeo = trackGeo(new THREE.TorusGeometry(0.32, 0.03, 6, 12));
+  for (const [dx, dy, dz] of [
+    [2.35, 0.46, 3.6],
+    [2.45, 0.46, 2.75],
+    [-2.4, 0.46, 3.7],
+    [2.4, 1.46, -35.8],
+  ]) {
+    const dGroup = new THREE.Group();
+    dGroup.position.set(dx, dy, dz);
+    const body = new THREE.Mesh(drumGeo, drumMat);
+    body.castShadow = true;
+    body.receiveShadow = true;
+    dGroup.add(body);
+    const rimTop = new THREE.Mesh(drumRimGeo, darkSteelMat);
+    rimTop.rotation.x = Math.PI / 2;
+    rimTop.position.y = 0.44;
+    dGroup.add(rimTop);
+    group.add(dGroup);
+  }
 
   // =========================================================================
   // ZONE A2: HIDDEN SPIKE CORRIDOR (z: -5.4 down to -15.4, topY = 0)
@@ -204,20 +336,26 @@ export function buildSectorOneLevel(
   addStaticPlatform(0, 0, -10.4, 4.4, 1.0, 10.0, concreteMat, true);
 
   const spikeTraps: SpikeTrap[] = [];
-  const createHiddenSpikeTrap = (id: string, cz: number) => {
+  const createHiddenSpikeTrap = (id: string, cz: number, topY = 0, plateW = 3.8, plateD = 1.45) => {
     const baseGroup = new THREE.Group();
-    baseGroup.position.set(0, 0.01, cz);
+    baseGroup.position.set(0, topY + 0.01, cz);
+
+    // Beveled dark steel pit perimeter frame
+    const pitBorder = new THREE.Mesh(trackGeo(new THREE.BoxGeometry(plateW + 0.22, 0.06, plateD + 0.22)), darkSteelMat);
+    pitBorder.position.y = -0.01;
+    pitBorder.receiveShadow = true;
+    baseGroup.add(pitBorder);
 
     const indicatorMat = trackMat(
       new THREE.MeshStandardMaterial({
-        color: 0x3f444c,
+        color: 0x3b424d,
         emissive: 0x000000,
         emissiveIntensity: 0,
-        roughness: 0.45,
-        metalness: 0.65,
+        roughness: 0.42,
+        metalness: 0.72,
       }),
     );
-    const seamPlate = new THREE.Mesh(trackGeo(new THREE.BoxGeometry(3.8, 0.04, 1.45)), indicatorMat);
+    const seamPlate = new THREE.Mesh(trackGeo(new THREE.BoxGeometry(plateW, 0.05, plateD)), indicatorMat);
     seamPlate.receiveShadow = true;
     baseGroup.add(seamPlate);
 
@@ -227,10 +365,15 @@ export function buildSectorOneLevel(
 
     const spikeConeGeo = trackGeo(new THREE.ConeGeometry(0.11, 0.92, 6));
     const tipGeo = trackGeo(new THREE.ConeGeometry(0.055, 0.32, 6));
+    const collarGeo = trackGeo(new THREE.CylinderGeometry(0.14, 0.14, 0.06, 6));
     for (let ix = -1; ix <= 1; ix++) {
       for (let iz = -1; iz <= 1; iz++) {
-        const sx = ix * 1.15;
-        const sz = iz * 0.42;
+        const sx = ix * (plateW * 0.3);
+        const sz = iz * (plateD * 0.29);
+        const collar = new THREE.Mesh(collarGeo, darkSteelMat);
+        collar.position.set(sx, 0.03, sz);
+        spikesGroup.add(collar);
+
         const cone = new THREE.Mesh(spikeConeGeo, spikeSteelMat);
         cone.position.set(sx, 0.46, sz);
         cone.castShadow = true;
@@ -244,22 +387,24 @@ export function buildSectorOneLevel(
 
     group.add(baseGroup);
 
-    spikeTraps.push({
+    const trap: SpikeTrap = {
       id,
-      triggerCenter: new THREE.Vector3(0, 0, cz),
-      triggerRadius: 2.35,
+      triggerCenter: new THREE.Vector3(0, topY, cz),
+      triggerRadius: 2.3,
       spikesGroup,
       indicatorMat,
       state: 'armed',
       timer: 0,
       extension: 0,
-      hazardBoxMin: new THREE.Vector3(-1.85, -0.1, cz - 0.65),
-      hazardBoxMax: new THREE.Vector3(1.85, 0.95, cz + 0.65),
-    });
+      hazardBoxMin: new THREE.Vector3(-(plateW * 0.48), topY - 0.1, cz - plateD * 0.44),
+      hazardBoxMax: new THREE.Vector3(plateW * 0.48, topY + 0.95, cz + plateD * 0.44),
+    };
+    spikeTraps.push(trap);
+    return trap;
   };
 
-  createHiddenSpikeTrap('spike_entry_1', -7.8);
-  createHiddenSpikeTrap('spike_entry_2', -12.6);
+  createHiddenSpikeTrap('spike_entry_1', -7.8, 0, 3.8, 1.45);
+  createHiddenSpikeTrap('spike_entry_2', -12.6, 0, 3.8, 1.45);
 
   // =========================================================================
   // ZONE B: COLLAPSING CATWALK GAP (z: -16.8 down to -29.0)
@@ -277,8 +422,8 @@ export function buildSectorOneLevel(
         color: 0xffffff,
         emissive: 0x000000,
         emissiveIntensity: 0,
-        roughness: 0.48,
-        metalness: 0.68,
+        roughness: 0.46,
+        metalness: 0.7,
       }),
     );
 
@@ -287,14 +432,17 @@ export function buildSectorOneLevel(
     deck.receiveShadow = true;
     platGroup.add(deck);
 
-    // Underside support struts (composite multi-part structure)
-    const strutGeo = trackGeo(new THREE.BoxGeometry(w * 0.94, 0.14, 0.18));
-    const s1 = new THREE.Mesh(strutGeo, rustBeamMat);
-    s1.position.set(0, -h * 0.6, -d * 0.32);
-    platGroup.add(s1);
-    const s2 = new THREE.Mesh(strutGeo, rustBeamMat);
-    s2.position.set(0, -h * 0.6, d * 0.32);
-    platGroup.add(s2);
+    // Steel edge trim rails + underside support girders + warning corner lights
+    const railEdge = new THREE.Mesh(trackGeo(new THREE.BoxGeometry(w + 0.1, 0.09, d + 0.1)), hazardMat);
+    railEdge.position.y = h * 0.38;
+    platGroup.add(railEdge);
+
+    const strutGeo = trackGeo(new THREE.BoxGeometry(w * 0.94, 0.16, 0.2));
+    for (const sz of [-d * 0.34, d * 0.34]) {
+      const s = new THREE.Mesh(strutGeo, rustBeamMat);
+      s.position.set(0, -h * 0.62, sz);
+      platGroup.add(s);
+    }
 
     group.add(platGroup);
 
@@ -326,36 +474,57 @@ export function buildSectorOneLevel(
   // =========================================================================
   addStaticPlatform(0, 1.0, -33.5, 6.4, 1.2, 6.6, concreteMat, true);
 
-  // Checkpoint Kiosk (5-part composite model)
+  // Checkpoint Security Terminal & Beacon Pad (detailed composite station)
   const cpKiosk = new THREE.Group();
-  cpKiosk.position.set(-1.9, 1.0, -33.5);
-  const cpBase = new THREE.Mesh(trackGeo(new THREE.CylinderGeometry(0.55, 0.65, 0.22, 12)), darkSteelMat);
+  cpKiosk.position.set(-1.95, 1.0, -33.5);
+
+  const cpBase = new THREE.Mesh(trackGeo(new THREE.CylinderGeometry(0.58, 0.68, 0.22, 12)), darkSteelMat);
   cpBase.position.y = 0.11;
   cpKiosk.add(cpBase);
-  const cpPillar = new THREE.Mesh(trackGeo(new THREE.BoxGeometry(0.28, 1.45, 0.28)), darkSteelMat);
-  cpPillar.position.y = 0.85;
-  cpPillar.castShadow = true;
-  cpKiosk.add(cpPillar);
+
+  const cpPedestal = new THREE.Mesh(trackGeo(new THREE.BoxGeometry(0.42, 1.1, 0.42)), darkSteelMat);
+  cpPedestal.position.y = 0.66;
+  cpPedestal.castShadow = true;
+  cpKiosk.add(cpPedestal);
+
+  // Angled Monitor Housing + Screen Texture
+  const screenCase = new THREE.Mesh(trackGeo(new THREE.BoxGeometry(0.68, 0.52, 0.26)), darkSteelMat);
+  screenCase.position.set(0.06, 1.32, 0.08);
+  screenCase.rotation.y = Math.PI * 0.22;
+  screenCase.rotation.x = -0.22;
+  cpKiosk.add(screenCase);
+
+  const screenFace = new THREE.Mesh(trackGeo(new THREE.PlaneGeometry(0.56, 0.4)), terminalScreenMat);
+  screenFace.position.set(0.09, 1.33, 0.19);
+  screenFace.rotation.y = Math.PI * 0.22;
+  screenFace.rotation.x = -0.22;
+  cpKiosk.add(screenFace);
+
+  const cpMast = new THREE.Mesh(trackGeo(new THREE.CylinderGeometry(0.06, 0.08, 0.65, 8)), chromeMat);
+  cpMast.position.set(-0.1, 1.68, -0.08);
+  cpKiosk.add(cpMast);
+
   const cpBeaconMat = trackMat(
     new THREE.MeshStandardMaterial({
       color: 0xf59e0b,
       emissive: 0xf59e0b,
-      emissiveIntensity: 1.8,
+      emissiveIntensity: 1.9,
       roughness: 0.2,
       metalness: 0.2,
     }),
   );
-  const cpBeacon = new THREE.Mesh(trackGeo(new THREE.CylinderGeometry(0.16, 0.16, 0.24, 12)), cpBeaconMat);
-  cpBeacon.position.y = 1.7;
+  const cpBeacon = new THREE.Mesh(trackGeo(new THREE.CylinderGeometry(0.15, 0.15, 0.24, 12)), cpBeaconMat);
+  cpBeacon.position.set(-0.1, 2.08, -0.08);
   cpKiosk.add(cpBeacon);
-  const cpRing = new THREE.Mesh(trackGeo(new THREE.TorusGeometry(0.7, 0.045, 8, 24)), cpBeaconMat);
+
+  const cpRing = new THREE.Mesh(trackGeo(new THREE.TorusGeometry(0.85, 0.045, 8, 28)), cpBeaconMat);
   cpRing.rotation.x = Math.PI / 2;
-  cpRing.position.set(1.9, 0.05, 0); // Centered over checkpoint pad at x = 0
+  cpRing.position.set(1.95, 0.05, 0); // Centered over checkpoint pad at x = 0
   cpKiosk.add(cpRing);
   group.add(cpKiosk);
 
-  const cpLight = new THREE.PointLight(0xf59e0b, 1.8, 9, 2);
-  cpLight.position.set(-1.9, 2.8, -33.5);
+  const cpLight = new THREE.PointLight(0xf59e0b, 1.9, 10, 2);
+  cpLight.position.set(-1.95, 3.0, -33.5);
   group.add(cpLight);
   emergencyLights.push(cpLight);
 
@@ -377,14 +546,26 @@ export function buildSectorOneLevel(
     const ramFace = new THREE.Mesh(trackGeo(new THREE.BoxGeometry(1.58, 1.15, 1.16)), hazardMat);
     pGroup.add(ramFace);
 
-    const rod = new THREE.Mesh(trackGeo(new THREE.CylinderGeometry(0.14, 0.14, 3.2, 8)), spikeSteelMat);
-    rod.rotation.z = Math.PI / 2;
-    pGroup.add(rod);
+    // Chrome dual hydraulic rods + bolted bumper caps
+    const rodGeo = trackGeo(new THREE.CylinderGeometry(0.1, 0.1, 3.4, 8));
+    for (const ry of [-0.32, 0.32]) {
+      const rod = new THREE.Mesh(rodGeo, chromeMat);
+      rod.rotation.z = Math.PI / 2;
+      rod.position.y = ry;
+      pGroup.add(rod);
+    }
+
+    const capGeo = trackGeo(new THREE.BoxGeometry(0.12, 1.38, 1.18));
+    for (const cx of [-0.82, 0.82]) {
+      const cap = new THREE.Mesh(capGeo, darkSteelMat);
+      cap.position.x = cx;
+      pGroup.add(cap);
+    }
 
     group.add(pGroup);
 
     const body = world.createRigidBody(rapier.RigidBodyDesc.kinematicPositionBased().setTranslation(0, 1.75, zPos));
-    const collider = world.createCollider(rapier.ColliderDesc.cuboid(0.75, 0.68, 0.55), body);
+    const collider = world.createCollider(rapier.ColliderDesc.cuboid(0.76, 0.68, 0.56), body);
     hazardColliderHandles.add(collider.handle);
 
     movingHazards.push({
@@ -397,7 +578,7 @@ export function buildSectorOneLevel(
       amplitude: 1.7,
       speed,
       phase,
-      halfExtents: new THREE.Vector3(0.75, 0.68, 0.55),
+      halfExtents: new THREE.Vector3(0.76, 0.68, 0.56),
     });
   };
 
@@ -405,78 +586,40 @@ export function buildSectorOneLevel(
   createHydraulicPiston('piston_2', -47.5, Math.PI, 2.35);
 
   // Hidden spike ambush right after second piston
-  const spikeAmbush = createHiddenSpikeTrapReturnable('spike_gauntlet', -51.4, 1.0);
-  function createHiddenSpikeTrapReturnable(id: string, cz: number, topY: number): SpikeTrap {
-    const baseGroup = new THREE.Group();
-    baseGroup.position.set(0, topY + 0.01, cz);
+  createHiddenSpikeTrap('spike_gauntlet', -51.4, 1.0, 3.6, 1.35);
 
-    const indicatorMat = trackMat(
-      new THREE.MeshStandardMaterial({
-        color: 0x3f444c,
-        emissive: 0x000000,
-        emissiveIntensity: 0,
-        roughness: 0.45,
-        metalness: 0.65,
-      }),
-    );
-    const seamPlate = new THREE.Mesh(trackGeo(new THREE.BoxGeometry(3.6, 0.04, 1.35)), indicatorMat);
-    seamPlate.receiveShadow = true;
-    baseGroup.add(seamPlate);
-
-    const spikesGroup = new THREE.Group();
-    spikesGroup.position.y = -0.95;
-    baseGroup.add(spikesGroup);
-
-    const spikeConeGeo = trackGeo(new THREE.ConeGeometry(0.11, 0.92, 6));
-    const tipGeo = trackGeo(new THREE.ConeGeometry(0.055, 0.32, 6));
-    for (let ix = -1; ix <= 1; ix++) {
-      for (let iz = -1; iz <= 1; iz++) {
-        const sx = ix * 1.1;
-        const sz = iz * 0.4;
-        const cone = new THREE.Mesh(spikeConeGeo, spikeSteelMat);
-        cone.position.set(sx, 0.46, sz);
-        spikesGroup.add(cone);
-        const tip = new THREE.Mesh(tipGeo, spikeTipMat);
-        tip.position.set(sx, 0.78, sz);
-        spikesGroup.add(tip);
-      }
-    }
-    group.add(baseGroup);
-
-    const trap: SpikeTrap = {
-      id,
-      triggerCenter: new THREE.Vector3(0, topY, cz),
-      triggerRadius: 2.2,
-      spikesGroup,
-      indicatorMat,
-      state: 'armed',
-      timer: 0,
-      extension: 0,
-      hazardBoxMin: new THREE.Vector3(-1.75, topY - 0.1, cz - 0.6),
-      hazardBoxMax: new THREE.Vector3(1.75, topY + 0.95, cz + 0.6),
-    };
-    spikeTraps.push(trap);
-    return trap;
-  }
-  void spikeAmbush;
-
-  // Swinging Pendulum Blade at z = -54.2
+  // Swinging Circular Pendulum Saw at z = -54.2
   {
     const pendGroup = new THREE.Group();
     pendGroup.position.set(0, 1.9, -54.2);
 
-    const blade = new THREE.Mesh(trackGeo(new THREE.BoxGeometry(1.7, 1.15, 0.35)), hazardMat);
-    blade.castShadow = true;
-    pendGroup.add(blade);
+    const sawDisc = new THREE.Mesh(trackGeo(new THREE.CylinderGeometry(0.86, 0.86, 0.12, 20)), chromeMat);
+    sawDisc.rotation.x = Math.PI / 2;
+    sawDisc.castShadow = true;
+    pendGroup.add(sawDisc);
 
-    const pivotArm = new THREE.Mesh(trackGeo(new THREE.CylinderGeometry(0.09, 0.09, 3.6, 8)), darkSteelMat);
-    pivotArm.position.y = 1.9;
+    const sawHub = new THREE.Mesh(trackGeo(new THREE.CylinderGeometry(0.48, 0.48, 0.18, 14)), hazardMat);
+    sawHub.rotation.x = Math.PI / 2;
+    pendGroup.add(sawHub);
+
+    // Sawtooth rim lugs
+    const toothGeo = trackGeo(new THREE.ConeGeometry(0.11, 0.24, 4));
+    for (let t = 0; t < 12; t++) {
+      const angle = (t / 12) * Math.PI * 2;
+      const tooth = new THREE.Mesh(toothGeo, spikeTipMat);
+      tooth.position.set(Math.cos(angle) * 0.88, Math.sin(angle) * 0.88, 0);
+      tooth.rotation.z = angle - Math.PI / 2;
+      pendGroup.add(tooth);
+    }
+
+    const pivotArm = new THREE.Mesh(trackGeo(new THREE.CylinderGeometry(0.09, 0.11, 3.8, 8)), darkSteelMat);
+    pivotArm.position.y = 1.95;
     pendGroup.add(pivotArm);
 
     group.add(pendGroup);
 
     const body = world.createRigidBody(rapier.RigidBodyDesc.kinematicPositionBased().setTranslation(0, 1.9, -54.2));
-    const collider = world.createCollider(rapier.ColliderDesc.cuboid(0.85, 0.58, 0.18), body);
+    const collider = world.createCollider(rapier.ColliderDesc.cuboid(0.86, 0.62, 0.18), body);
     hazardColliderHandles.add(collider.handle);
 
     movingHazards.push({
@@ -489,14 +632,13 @@ export function buildSectorOneLevel(
       amplitude: 2.2,
       speed: 2.5,
       phase: 0.7,
-      halfExtents: new THREE.Vector3(0.85, 0.58, 0.18),
+      halfExtents: new THREE.Vector3(0.86, 0.62, 0.18),
     });
   }
 
   // =========================================================================
   // ZONE E: FAKE EXIT DECOY & TRUE RESCUE EXTRACTION GANTRY
   // =========================================================================
-  // Safe approach pad before fake exit (z: -57.4 to -61.6, topY = 1.0)
   addStaticPlatform(0, 1.0, -59.5, 4.4, 1.1, 4.2, concreteMat, true);
 
   // Trapdoor grate directly in front of the fake green door (z: -61.7 to -65.7, topY = 1.0)
@@ -521,6 +663,10 @@ export function buildSectorOneLevel(
   fakeDoorFrame.position.set(0, 3.0, -66.2);
   group.add(fakeDoorFrame);
 
+  const fakeVaultDoor = new THREE.Mesh(trackGeo(new THREE.BoxGeometry(2.6, 2.6, 0.25)), darkSteelMat);
+  fakeVaultDoor.position.set(0, 2.25, -65.85);
+  group.add(fakeVaultDoor);
+
   const fakeSignMat = trackMat(
     new THREE.MeshStandardMaterial({
       map: textures.exitSignTexture,
@@ -531,7 +677,7 @@ export function buildSectorOneLevel(
     }),
   );
   const fakeSign = new THREE.Mesh(trackGeo(new THREE.PlaneGeometry(3.2, 1.2)), fakeSignMat);
-  fakeSign.position.set(0, 3.85, -65.85);
+  fakeSign.position.set(0, 3.95, -65.85);
   group.add(fakeSign);
 
   const fakeExitLight = new THREE.PointLight(0x10b981, 2.4, 12, 2);
@@ -540,9 +686,8 @@ export function buildSectorOneLevel(
   emergencyLights.push(fakeExitLight);
 
   // TRUE RESCUE GANTRY ON THE RIGHT (+X) — rises into reachable position when decoy activates!
-  // Base step platform on the right side (x: +4.3, z: -60.5 to -74.5, topY = 1.65)
   const rescueGantryGroup = new THREE.Group();
-  const gantryStartPos = new THREE.Vector3(4.3, -4.5, -67.5); // Hidden below until decoy triggers!
+  const gantryStartPos = new THREE.Vector3(4.3, -4.5, -67.5);
   const gantryRaisedPos = new THREE.Vector3(4.3, 1.25, -67.5);
   rescueGantryGroup.position.copy(gantryStartPos);
 
@@ -560,7 +705,7 @@ export function buildSectorOneLevel(
   );
   world.createCollider(rapier.ColliderDesc.cuboid(1.7, 0.4, 7.0).setFriction(0.9), gantryBody);
 
-  // True Extraction Airlock Chamber + Younger Sister waiting at (x: 4.3, y: 1.65, z: -72.8)
+  // True Extraction Airlock Chamber + Circular Vault Door + Younger Sister waiting at Airlock B-2
   addStaticPlatform(4.3, 1.65, -73.0, 5.4, 1.2, 5.2, concreteMat, true);
 
   const rescueSignMat = trackMat(
@@ -572,12 +717,32 @@ export function buildSectorOneLevel(
       roughness: 0.35,
     }),
   );
-  const rescueArch = new THREE.Mesh(trackGeo(new THREE.BoxGeometry(5.6, 4.2, 0.6)), wallMat);
-  rescueArch.position.set(4.3, 3.65, -75.4);
+  const rescueArch = new THREE.Mesh(trackGeo(new THREE.BoxGeometry(5.6, 4.4, 0.6)), wallMat);
+  rescueArch.position.set(4.3, 3.75, -75.4);
   group.add(rescueArch);
 
-  const rescueSign = new THREE.Mesh(trackGeo(new THREE.PlaneGeometry(3.4, 1.2)), rescueSignMat);
-  rescueSign.position.set(4.3, 4.4, -75.05);
+  // Circular Airlock Vault Door & Locking Wheel
+  const vaultDoor = new THREE.Mesh(trackGeo(new THREE.CylinderGeometry(1.35, 1.35, 0.24, 24)), darkSteelMat);
+  vaultDoor.rotation.x = Math.PI / 2;
+  vaultDoor.position.set(4.3, 2.95, -75.02);
+  group.add(vaultDoor);
+
+  const vaultRim = new THREE.Mesh(trackGeo(new THREE.TorusGeometry(1.38, 0.09, 8, 24)), hazardMat);
+  vaultRim.position.set(4.3, 2.95, -74.92);
+  group.add(vaultRim);
+
+  const vaultWheel = new THREE.Group();
+  vaultWheel.position.set(4.3, 2.95, -74.84);
+  vaultWheel.add(new THREE.Mesh(trackGeo(new THREE.TorusGeometry(0.46, 0.055, 8, 16)), chromeMat));
+  for (let s = 0; s < 3; s++) {
+    const spoke = new THREE.Mesh(trackGeo(new THREE.CylinderGeometry(0.03, 0.03, 0.9, 6)), chromeMat);
+    spoke.rotation.z = (s * Math.PI) / 3;
+    vaultWheel.add(spoke);
+  }
+  group.add(vaultWheel);
+
+  const rescueSign = new THREE.Mesh(trackGeo(new THREE.PlaneGeometry(3.4, 1.15)), rescueSignMat);
+  rescueSign.position.set(4.3, 4.9, -75.04);
   group.add(rescueSign);
 
   const rescuePadMat = trackMat(
@@ -593,7 +758,7 @@ export function buildSectorOneLevel(
   group.add(rescuePad);
 
   const rescueLight = new THREE.PointLight(0x38bdf8, 2.8, 14, 2);
-  rescueLight.position.set(4.3, 4.2, -72.6);
+  rescueLight.position.set(4.3, 4.3, -72.6);
   group.add(rescueLight);
   emergencyLights.push(rescueLight);
 
@@ -602,16 +767,18 @@ export function buildSectorOneLevel(
   group.add(sisterRig.root);
 
   // =========================================================================
-  // ATMOSPHERIC FACILITY ARCHITECTURE (Flanking pillars, overhead pipes, abyss)
+  // HIGH-DETAIL INSTANCED ARCHITECTURAL PROPS (Guardrails, Lights, Pipes, Cables)
   // =========================================================================
-  // Instanced structural I-beam ribs along corridor for low draw calls
+  const dummy = new THREE.Object3D();
+
+  // 1. Structural I-beam Pillars (instanced)
   const pillarGeo = trackGeo(new THREE.BoxGeometry(0.65, 14.0, 0.85));
   const pillarInst = new THREE.InstancedMesh(pillarGeo, darkSteelMat, 22);
-  const dummy = new THREE.Object3D();
   let pIdx = 0;
   for (let i = 0; i < 11; i++) {
     const pz = 2.0 - i * 7.4;
-    dummy.position.set(-5.8, 1.5, pz);
+    dummy.position.set(-6.0, 1.5, pz);
+    dummy.rotation.set(0, 0, 0);
     dummy.updateMatrix();
     pillarInst.setMatrixAt(pIdx++, dummy.matrix);
 
@@ -622,19 +789,61 @@ export function buildSectorOneLevel(
   pillarInst.computeBoundingSphere();
   group.add(pillarInst);
 
-  // Overhead industrial ceiling trusses & pipes (instanced)
-  const trussGeo = trackGeo(new THREE.BoxGeometry(15.0, 0.45, 0.55));
+  // 2. Overhead Ceiling Trusses & Fluorescent Light Fixtures (instanced)
+  const trussGeo = trackGeo(new THREE.BoxGeometry(15.2, 0.45, 0.55));
   const trussInst = new THREE.InstancedMesh(trussGeo, rustBeamMat, 11);
+  const fluoroGeo = trackGeo(new THREE.BoxGeometry(2.6, 0.09, 0.22));
+  const fluoroInst = new THREE.InstancedMesh(fluoroGeo, fluoroMat, 11);
   for (let i = 0; i < 11; i++) {
-    dummy.position.set(1.2, 6.8, 2.0 - i * 7.4);
+    const lz = 2.0 - i * 7.4;
+    dummy.position.set(1.1, 6.8, lz);
+    dummy.rotation.set(0, 0, 0);
     dummy.updateMatrix();
     trussInst.setMatrixAt(i, dummy.matrix);
+
+    dummy.position.set(0.3, 6.52, lz);
+    dummy.updateMatrix();
+    fluoroInst.setMatrixAt(i, dummy.matrix);
   }
   trussInst.computeBoundingSphere();
+  fluoroInst.computeBoundingSphere();
   group.add(trussInst);
+  group.add(fluoroInst);
 
-  // Longitudinal pipes
-  const pipeGeo = trackGeo(new THREE.CylinderGeometry(0.22, 0.22, 82, 8));
+  // 3. Corridor Safety Guardrail Posts (instanced along outer edges)
+  const railPostPositions: Array<[number, number, number]> = [
+    [2.9, 0, 3.6], [2.9, 0, 1.2], [2.9, 0, -1.2], [2.9, 0, -3.6],
+    [-2.0, 0, -6.2], [-2.0, 0, -10.4], [-2.0, 0, -14.6],
+    [2.0, 0, -6.2], [2.0, 0, -10.4], [2.0, 0, -14.6],
+    [-3.0, 1.0, -31.0], [-3.0, 1.0, -33.5], [-3.0, 1.0, -36.0],
+    [3.0, 1.0, -31.0], [3.0, 1.0, -33.5], [3.0, 1.0, -36.0],
+  ];
+  const postGeo = trackGeo(new THREE.CylinderGeometry(0.045, 0.05, 0.95, 6));
+  const postInst = new THREE.InstancedMesh(postGeo, hazardMat, railPostPositions.length);
+  railPostPositions.forEach(([x, y, z], idx) => {
+    dummy.position.set(x, y + 0.47, z);
+    dummy.rotation.set(0, 0, 0);
+    dummy.updateMatrix();
+    postInst.setMatrixAt(idx, dummy.matrix);
+  });
+  postInst.computeBoundingSphere();
+  group.add(postInst);
+
+  // Continuous Top Rail Bars along outer edges
+  const addRailBar = (x: number, y: number, z: number, len: number) => {
+    const bar = new THREE.Mesh(trackGeo(new THREE.CylinderGeometry(0.032, 0.032, len, 6)), chromeMat);
+    bar.rotation.x = Math.PI / 2;
+    bar.position.set(x, y + 0.92, z);
+    group.add(bar);
+  };
+  addRailBar(2.9, 0, 0, 7.3);
+  addRailBar(-2.0, 0, -10.4, 8.5);
+  addRailBar(2.0, 0, -10.4, 8.5);
+  addRailBar(-3.0, 1.0, -33.5, 5.1);
+  addRailBar(3.0, 1.0, -33.5, 5.1);
+
+  // 4. Pressurized Overhead Conduits, Valve Handwheels & Hanging Power Cables
+  const pipeGeo = trackGeo(new THREE.CylinderGeometry(0.22, 0.22, 84, 8));
   for (const px of [-4.2, 6.8]) {
     const pipe = new THREE.Mesh(pipeGeo, rustBeamMat);
     pipe.rotation.x = Math.PI / 2;
@@ -642,9 +851,29 @@ export function buildSectorOneLevel(
     group.add(pipe);
   }
 
-  // Deep reactor abyss glow plane far below
+  const valveGeo = trackGeo(new THREE.TorusGeometry(0.24, 0.04, 6, 12));
+  for (const vz of [-8, -24, -40, -56]) {
+    const valve = new THREE.Mesh(valveGeo, hazardMat);
+    valve.rotation.y = Math.PI / 2;
+    valve.position.set(-3.95, 5.9, vz);
+    group.add(valve);
+  }
+
+  // Draping Overhead Cables (CatmullRomCurve3 + TubeGeometry)
+  for (const cz of [-5, -19, -35, -50, -64]) {
+    const curve = new THREE.CatmullRomCurve3([
+      new THREE.Vector3(-4.2, 6.0, cz),
+      new THREE.Vector3(-1.1, 4.9, cz - 0.6),
+      new THREE.Vector3(2.8, 5.1, cz - 0.4),
+      new THREE.Vector3(6.8, 6.0, cz),
+    ]);
+    const cableGeo = trackGeo(new THREE.TubeGeometry(curve, 14, 0.045, 5, false));
+    group.add(new THREE.Mesh(cableGeo, cableMat));
+  }
+
+  // Deep reactor abyss plane far below
   const abyssPlane = new THREE.Mesh(
-    trackGeo(new THREE.PlaneGeometry(60, 120)),
+    trackGeo(new THREE.PlaneGeometry(70, 130)),
     trackMat(new THREE.MeshBasicMaterial({ color: 0x05070a })),
   );
   abyssPlane.rotation.x = -Math.PI / 2;
@@ -659,6 +888,8 @@ export function buildSectorOneLevel(
   let fakeTrapdoorY = 0.825;
   let gantryLiftProgress = 0;
   let victoryTriggered = false;
+  let introTimer = 0;
+  let shutterProgress = 0;
 
   const spawnPos = new THREE.Vector3(0, 0.95, 2.2);
   const checkpointPos = new THREE.Vector3(0, 1.95, -33.5);
@@ -673,6 +904,10 @@ export function buildSectorOneLevel(
   };
 
   const resetTraps = () => {
+    introTimer = 0;
+    shutterProgress = 0;
+    blastShutter.position.y = shutterOpenY;
+
     for (const st of spikeTraps) {
       st.state = 'armed';
       st.timer = 0;
@@ -712,6 +947,12 @@ export function buildSectorOneLevel(
     victoryTriggered = false;
   };
 
+  const updateAmbient = (dt: number) => {
+    sisterRig.update(dt);
+    introSisterRig.update(dt);
+    vaultWheel.rotation.z += dt * 0.45;
+  };
+
   const update: LevelInstance['update'] = (
     dt,
     elapsed,
@@ -722,7 +963,14 @@ export function buildSectorOneLevel(
     onVictory,
     onSpikeKill,
   ) => {
-    sisterRig.update(elapsed);
+    updateAmbient(dt);
+
+    // Entry observation bay blast shutter slides shut after 4.8s or once player moves down corridor
+    introTimer += dt;
+    if ((introTimer > 4.8 || playerPos.z < -4.2) && shutterProgress < 1) {
+      shutterProgress = Math.min(1, shutterProgress + dt * 1.4);
+      blastShutter.position.y = THREE.MathUtils.lerp(shutterOpenY, shutterClosedY, shutterProgress);
+    }
 
     // 1. Update Hidden Spike Traps
     for (const st of spikeTraps) {
@@ -751,7 +999,6 @@ export function buildSectorOneLevel(
         st.spikesGroup.position.y = THREE.MathUtils.lerp(-0.95, 0.0, st.extension);
         st.timer -= dt;
 
-        // Check lethal spike intersection against player feet/body
         if (
           st.extension > 0.35 &&
           playerPos.x >= st.hazardBoxMin.x &&
@@ -783,7 +1030,6 @@ export function buildSectorOneLevel(
     for (const cp of collapsingPlatforms) {
       if (cp.state === 'idle') {
         const standingOnThis = groundedColliderHandle === cp.collider.handle;
-        // Also allow proximity foot check in case controller steps onto edge
         const onTop =
           standingOnThis ||
           (Math.abs(playerPos.x - cp.basePos.x) <= cp.halfSize.x + 0.2 &&
@@ -829,7 +1075,6 @@ export function buildSectorOneLevel(
       }
       mh.body.setNextKinematicTranslation({ x: nx, y: ny, z: mh.basePos.z });
 
-      // Direct AABB lethal contact check (guarantees reliable kill even if side-swiped)
       if (
         Math.abs(playerPos.x - nx) < mh.halfExtents.x + 0.28 &&
         Math.abs(playerPos.z - mh.basePos.z) < mh.halfExtents.z + 0.28 &&
@@ -866,7 +1111,6 @@ export function buildSectorOneLevel(
     }
 
     if (fakeExitTriggered) {
-      // Lift rescue gantry smoothly into place
       if (gantryLiftProgress < 1) {
         gantryLiftProgress = Math.min(1, gantryLiftProgress + dt * 2.2);
         const eased = 1 - Math.pow(1 - gantryLiftProgress, 3);
@@ -875,7 +1119,6 @@ export function buildSectorOneLevel(
         gantryBody.setNextKinematicTranslation({ x: gantryRaisedPos.x, y: gy, z: gantryRaisedPos.z });
       }
 
-      // Drop fake exit trapdoor if player steps onto the decoy threshold
       if (!fakeTrapdoorFalling && playerPos.z <= -61.5 && Math.abs(playerPos.x) < 2.5) {
         fakeTrapdoorDropTimer -= dt;
         if (fakeTrapdoorDropTimer <= 0) {
@@ -923,12 +1166,15 @@ export function buildSectorOneLevel(
     hazardColliderHandles,
     collapsingColliderMap,
     sisterRig,
+    introSisterRig,
     emergencyLights,
+    updateAmbient,
     update,
     resetTraps,
     activateCheckpointVisuals,
     dispose: () => {
       sisterRig.dispose();
+      introSisterRig.dispose();
       geometries.forEach((g) => g.dispose());
       materials.forEach((m) => m.dispose());
     },

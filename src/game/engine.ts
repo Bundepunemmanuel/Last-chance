@@ -141,7 +141,7 @@ export async function mountGameEngine(
 
   // Build procedural PBR textures, protagonist, and level
   const textures: FacilityTextures = createFacilityTextures(renderer.capabilities.getMaxAnisotropy());
-  const playerRig: PlayerRig = createMaleProtagonist(textures.contactShadowTex);
+  const playerRig: PlayerRig = createMaleProtagonist(textures.contactShadowTex, textures.jacketFabricColor);
   scene.add(playerRig.root);
   scene.add(playerRig.contactShadow);
 
@@ -420,11 +420,11 @@ export async function mountGameEngine(
     }
 
     if (phase === 'title') {
-      // Gentle atmospheric orbit around protagonist on start screen
-      playerRig.updateAnimation(dt, 0, 6.6, true, 0, false, 0);
-      level.sisterRig.update(totalElapsed);
-      _desiredCamPos.set(Math.sin(totalElapsed * 0.35) * 2.2, 2.25, 6.2);
-      _desiredLookAt.set(0, 1.15, -2.5);
+      // Gentle atmospheric orbit framing both protagonist & sister inside observation bay
+      playerRig.updateAnimation(dt, 0, 6.6, true, 0, false);
+      level.updateAmbient(dt);
+      _desiredCamPos.set(1.6 + Math.sin(totalElapsed * 0.35) * 1.4, 2.35, 6.0);
+      _desiredLookAt.set(-1.1, 1.15, -1.8);
       camera.position.x = THREE.MathUtils.damp(camera.position.x, _desiredCamPos.x, 4, dt);
       camera.position.y = THREE.MathUtils.damp(camera.position.y, _desiredCamPos.y, 4, dt);
       camera.position.z = THREE.MathUtils.damp(camera.position.z, _desiredCamPos.z, 4, dt);
@@ -434,13 +434,13 @@ export async function mountGameEngine(
     }
 
     if (phase === 'paused' || phase === 'victory') {
-      level.sisterRig.update(totalElapsed);
+      level.updateAmbient(dt);
       return;
     }
 
     if (phase === 'dead') {
       deathTimer += dt;
-      playerRig.updateAnimation(dt, 0, 6.6, true, 0, true, deathTimer);
+      playerRig.updateAnimation(dt, 0, 6.6, true, 0, true);
       if (shakeIntensity > 0.001) {
         shakeIntensity = Math.max(0, shakeIntensity - dt * 1.1);
         camera.position.x += (Math.random() - 0.5) * shakeIntensity;
@@ -614,7 +614,7 @@ export async function mountGameEngine(
       footstepTimer = 0.08;
     }
 
-    playerRig.updateAnimation(dt, targetSpeed, 6.6, grounded, velocityY, false, 0);
+    playerRig.updateAnimation(dt, targetSpeed, 6.6, grounded, velocityY, false);
 
     // 3. Level Traps, Checkpoint & Victory
     level.update(
@@ -685,7 +685,7 @@ export async function mountGameEngine(
     const rawDt = (now - lastPerfTime) / 1000;
 
     // 30 FPS pacing mode for entry-level Android battery/thermal optimization (real GPUs)
-    if (!isSoftwareGl && target30Fps && rawDt < 1 / 31.5) {
+    if (!isSoftwareGl && target30Fps && rawDt < 0.030) {
       frameId = requestAnimationFrame(tick);
       return;
     }
