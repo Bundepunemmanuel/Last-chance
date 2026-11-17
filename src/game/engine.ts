@@ -235,6 +235,7 @@ export async function mountGameEngine(
   let trapBannerTimer = 0;
   let footstepTimer = 0;
   let movementMode: MovementMode = 'idle';
+  let shakeIntensity = 0;
 
   // Keyboard tracking
   const keys = new Set<string>();
@@ -299,6 +300,7 @@ export async function mountGameEngine(
     if (phase !== 'playing') return;
     phase = 'dead';
     deathTimer = 0;
+    shakeIntensity = 0.28;
     deathReason = reason;
     runDeaths += 1;
     totalLifetimeDeaths += 1;
@@ -439,7 +441,15 @@ export async function mountGameEngine(
     if (phase === 'dead') {
       deathTimer += dt;
       playerRig.updateAnimation(dt, 0, 6.6, true, 0, true, deathTimer);
-      if (deathTimer >= 0.85) {
+      if (shakeIntensity > 0.001) {
+        shakeIntensity = Math.max(0, shakeIntensity - dt * 1.1);
+        camera.position.x += (Math.random() - 0.5) * shakeIntensity;
+        camera.position.y += (Math.random() - 0.5) * shakeIntensity;
+      }
+      const skipRequested =
+        deathTimer >= 0.16 &&
+        (keys.has('Space') || keys.has('KeyR') || virtualInputRef.current.jumpPressed);
+      if (deathTimer >= 0.65 || skipRequested) {
         restartFromCheckpoint();
       }
       return;
@@ -615,6 +625,9 @@ export async function mountGameEngine(
       (msg) => {
         trapBannerText = msg;
         trapBannerTimer = 2.6;
+        if (msg.includes('DECOY')) {
+          shakeIntensity = 0.16;
+        }
       },
       () => {
         checkpointActive = true;
@@ -656,6 +669,11 @@ export async function mountGameEngine(
     camera.position.x = THREE.MathUtils.damp(camera.position.x, _desiredCamPos.x, 7.5, dt);
     camera.position.y = THREE.MathUtils.damp(camera.position.y, _desiredCamPos.y, 6.5, dt);
     camera.position.z = THREE.MathUtils.damp(camera.position.z, _desiredCamPos.z, 8.5, dt);
+    if (shakeIntensity > 0.001) {
+      shakeIntensity = Math.max(0, shakeIntensity - dt * 0.9);
+      camera.position.x += (Math.random() - 0.5) * shakeIntensity;
+      camera.position.y += (Math.random() - 0.5) * shakeIntensity;
+    }
     _currentLookAt.lerp(_desiredLookAt, 1 - Math.exp(-9.0 * dt));
     camera.lookAt(_currentLookAt);
   };

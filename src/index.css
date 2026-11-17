@@ -33,3 +33,26 @@
   font-family: var(--font-mono);
   font-variant-numeric: tabular-nums;
 }
+
+.hud-text-shadow {
+  text-shadow: 0 1px 4px rgba(0, 0, 0, 0.92), 0 0 12px rgba(0, 0, 0, 0.72);
+}
+
+.safe-hud-top {
+  padding-top: max(10px, env(safe-area-inset-top));
+  padding-left: max(14px, env(safe-area-inset-left));
+  padding-right: max(14px, env(safe-area-inset-right));
+}
+
+.safe-controls-bottom {
+  padding-bottom: max(12px, env(safe-area-inset-bottom));
+  padding-left: max(14px, env(safe-area-inset-left));
+  padding-right: max(14px, env(safe-area-inset-right));
+}
+
+.safe-screen-pad {
+  padding-top: max(14px, env(safe-area-inset-top));
+  padding-bottom: max(14px, env(safe-area-inset-bottom));
+  padding-left: max(18px, env(safe-area-inset-left));
+  padding-right: max(18px, env(safe-area-inset-right));
+}

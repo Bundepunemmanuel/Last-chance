@@ -1,5 +1,5 @@
 import React, { useRef, useState } from 'react';
-import { ArrowUp, Footprints } from 'lucide-react';
+import { ArrowUp } from 'lucide-react';
 import type { VirtualInputState } from '../game/types';
 
 interface TouchControlsProps {
@@ -7,26 +7,23 @@ interface TouchControlsProps {
   movementMode: 'idle' | 'walk' | 'run' | 'air';
 }
 
-const MAX_RADIUS = 46;
+const MAX_RADIUS = 48;
 
 export const TouchControls: React.FC<TouchControlsProps> = ({ inputRef, movementMode }) => {
-  const padRef = useRef<HTMLDivElement | null>(null);
+  const zoneRef = useRef<HTMLDivElement | null>(null);
   const stickPointerId = useRef<number | null>(null);
   const jumpPointerId = useRef<number | null>(null);
 
-  const [knobOffset, setKnobOffset] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
   const [stickActive, setStickActive] = useState(false);
+  const [origin, setOrigin] = useState<{ x: number; y: number } | null>(null);
+  const [knobOffset, setKnobOffset] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
   const [jumpActive, setJumpActive] = useState(false);
-  const [walkLocked, setWalkLocked] = useState(false);
+
+  const originRef = useRef<{ x: number; y: number }>({ x: 0, y: 0 });
 
   const updateStickFromClient = (clientX: number, clientY: number) => {
-    const el = padRef.current;
-    if (!el) return;
-    const rect = el.getBoundingClientRect();
-    const cx = rect.left + rect.width / 2;
-    const cy = rect.top + rect.height / 2;
-    let dx = clientX - cx;
-    let dy = clientY - cy;
+    let dx = clientX - originRef.current.x;
+    let dy = clientY - originRef.current.y;
     const dist = Math.hypot(dx, dy);
     if (dist > MAX_RADIUS) {
       dx = (dx / dist) * MAX_RADIUS;
@@ -41,26 +38,45 @@ export const TouchControls: React.FC<TouchControlsProps> = ({ inputRef, movement
   const resetStick = () => {
     stickPointerId.current = null;
     setStickActive(false);
+    setOrigin(null);
     setKnobOffset({ x: 0, y: 0 });
     inputRef.current.moveX = 0;
     inputRef.current.moveY = 0;
   };
 
-  const onStickPointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
+  const onZonePointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (stickPointerId.current !== null) return;
     e.preventDefault();
     e.currentTarget.setPointerCapture(e.pointerId);
     stickPointerId.current = e.pointerId;
+
+    const zone = zoneRef.current;
+    if (zone) {
+      const rect = zone.getBoundingClientRect();
+      // Clamp floating joystick center inside safe zone bounds
+      const localX = Math.max(62, Math.min(rect.width - 62, e.clientX - rect.left));
+      const localY = Math.max(62, Math.min(rect.height - 62, e.clientY - rect.top));
+      const screenOriginX = rect.left + localX;
+      const screenOriginY = rect.top + localY;
+      originRef.current = { x: screenOriginX, y: screenOriginY };
+      setOrigin({ x: localX, y: localY });
+    } else {
+      originRef.current = { x: e.clientX, y: e.clientY };
+    }
+
     setStickActive(true);
-    updateStickFromClient(e.clientX, e.clientY);
+    setKnobOffset({ x: 0, y: 0 });
+    inputRef.current.moveX = 0;
+    inputRef.current.moveY = 0;
   };
 
-  const onStickPointerMove = (e: React.PointerEvent<HTMLDivElement>) => {
+  const onZonePointerMove = (e: React.PointerEvent<HTMLDivElement>) => {
     if (stickPointerId.current !== e.pointerId) return;
     e.preventDefault();
     updateStickFromClient(e.clientX, e.clientY);
   };
 
-  const onStickPointerUp = (e: React.PointerEvent<HTMLDivElement>) => {
+  const onZonePointerUp = (e: React.PointerEvent<HTMLDivElement>) => {
     if (stickPointerId.current !== e.pointerId) return;
     e.preventDefault();
     resetStick();
@@ -82,80 +98,75 @@ export const TouchControls: React.FC<TouchControlsProps> = ({ inputRef, movement
     inputRef.current.jumpPressed = false;
   };
 
-  const toggleWalk = () => {
-    const next = !walkLocked;
-    setWalkLocked(next);
-    inputRef.current.walkModifier = next;
-  };
+  const isRunning = stickActive && movementMode === 'run';
 
   return (
-    <div className="pointer-events-none fixed inset-x-0 bottom-0 z-20 flex items-end justify-between px-5 pb-5 sm:px-8 sm:pb-7">
-      {/* Left Thumb Zone: Virtual Analog Joystick */}
-      <div className="pointer-events-auto flex flex-col items-center gap-2">
+    <div className="pointer-events-none fixed inset-0 z-20">
+      {/* Left-Half Floating Virtual Joystick Touch Zone */}
+      <div
+        ref={zoneRef}
+        onPointerDown={onZonePointerDown}
+        onPointerMove={onZonePointerMove}
+        onPointerUp={onZonePointerUp}
+        onPointerCancel={onZonePointerUp}
+        aria-label="Movement Joystick Area"
+        role="slider"
+        aria-valuetext={movementMode}
+        className="pointer-events-auto safe-controls-bottom absolute bottom-0 left-0 h-[66%] w-[46%] touch-none"
+      >
+        {/* Active floating stick OR subtle resting anchor in bottom-left */}
         <div
-          ref={padRef}
-          onPointerDown={onStickPointerDown}
-          onPointerMove={onStickPointerMove}
-          onPointerUp={onStickPointerUp}
-          onPointerCancel={onStickPointerUp}
-          aria-label="Movement Joystick"
-          role="slider"
-          aria-valuetext={movementMode}
-          className={`relative flex h-32 w-32 touch-none items-center justify-center rounded-full border transition-colors ${
-            stickActive
-              ? 'border-amber-400/80 bg-[#0d131c]/85'
-              : 'border-slate-500/45 bg-[#0d131c]/70'
+          style={
+            stickActive && origin
+              ? {
+                  left: `${origin.x}px`,
+                  top: `${origin.y}px`,
+                  transform: 'translate(-50%, -50%)',
+                }
+              : undefined
+          }
+          className={`pointer-events-none flex h-28 w-28 items-center justify-center rounded-full border transition-opacity ${
+            stickActive && origin
+              ? `absolute opacity-100 ${
+                  isRunning ? 'border-amber-400/80 bg-[#0d131c]/65' : 'border-emerald-400/70 bg-[#0d131c]/60'
+                }`
+              : 'absolute bottom-5 left-5 border-slate-400/35 bg-[#0d131c]/40 opacity-65 sm:bottom-7 sm:left-7'
           }`}
         >
-          {/* Inner Walk-Threshold Ring */}
-          <div className="pointer-events-none h-16 w-16 rounded-full border border-dashed border-slate-500/35" />
+          {/* Analog Walk vs Run Ring */}
+          <div className="h-14 w-14 rounded-full border border-dashed border-slate-400/35" />
 
-          {/* Draggable Thumbstick Knob */}
+          {/* Thumbstick Knob */}
           <div
             style={{
               transform: `translate3d(${knobOffset.x}px, ${knobOffset.y}px, 0)`,
             }}
-            className={`pointer-events-none absolute h-12 w-12 rounded-full border shadow-lg transition-colors ${
+            className={`absolute h-12 w-12 rounded-full border shadow-lg transition-colors ${
               stickActive
-                ? 'border-amber-300 bg-amber-500/90'
-                : 'border-slate-300/60 bg-slate-200/25'
+                ? isRunning
+                  ? 'border-amber-200 bg-amber-500/90'
+                  : 'border-emerald-200 bg-emerald-400/85'
+                : 'border-slate-300/50 bg-slate-200/20'
             }`}
           />
         </div>
-        <span className="text-[11px] font-medium tracking-wide text-slate-300/80">
-          {movementMode === 'walk' ? 'Walking' : movementMode === 'run' ? 'Running' : 'Move'}
-        </span>
       </div>
 
-      {/* Right Thumb Zone: Precision Walk Toggle + Jump Button */}
-      <div className="pointer-events-auto flex items-end gap-4">
-        <button
-          type="button"
-          onClick={toggleWalk}
-          aria-pressed={walkLocked}
-          className={`flex h-12 min-w-[48px] items-center justify-center gap-1.5 rounded-xl border px-3.5 text-xs font-semibold transition-colors focus-visible:outline-2 focus-visible:outline-amber-400 ${
-            walkLocked
-              ? 'border-amber-400 bg-amber-500/25 text-amber-200'
-              : 'border-slate-500/45 bg-[#0d131c]/75 text-slate-300 hover:border-slate-400'
-          }`}
-        >
-          <Footprints className="h-4 w-4" />
-          <span>Walk</span>
-        </button>
-
+      {/* Right-Thumb Tactile Jump Button */}
+      <div className="safe-controls-bottom pointer-events-none absolute right-0 bottom-0 flex items-end justify-end pr-4 pb-4 sm:pr-7 sm:pb-6">
         <button
           type="button"
           onPointerDown={onJumpPointerDown}
           onPointerUp={onJumpPointerUp}
           onPointerCancel={onJumpPointerUp}
           aria-label="Jump"
-          className={`flex h-20 w-20 touch-none flex-col items-center justify-center rounded-full border-2 font-display text-xs font-bold tracking-wider transition-transform focus-visible:outline-2 focus-visible:outline-amber-400 ${
+          className={`pointer-events-auto flex h-[84px] w-[84px] touch-none flex-col items-center justify-center rounded-full border-2 font-display text-xs font-bold tracking-wider transition-transform focus-visible:outline-2 focus-visible:outline-amber-400 ${
             jumpActive
-              ? 'scale-95 border-amber-300 bg-amber-500 text-slate-950'
-              : 'border-amber-400/80 bg-[#121924]/85 text-amber-300 hover:bg-[#182230]/90'
+              ? 'scale-92 border-amber-200 bg-amber-500 text-slate-950 shadow-[0_0_24px_rgba(245,158,11,0.5)]'
+              : 'border-amber-400/85 bg-[#101722]/75 text-amber-300 shadow-lg'
           }`}
         >
-          <ArrowUp className="h-6 w-6" />
+          <ArrowUp className="h-6 w-6 stroke-[2.5]" />
           <span>JUMP</span>
         </button>
       </div>
