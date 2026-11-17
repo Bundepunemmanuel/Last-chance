@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment.js';
 import RAPIER from '@dimforge/rapier3d-compat';
 import { createFacilityTextures, type FacilityTextures } from './textures';
-import { createMaleProtagonist, type PlayerRig } from './character';
+import { loadProtagonistRig, type PlayerRig } from './character';
 import { buildSectorOneLevel, type LevelInstance } from './levelOne';
 import { soundEngine } from './audio';
 import { loadSaveData, updateSaveData } from './storage';
@@ -52,6 +52,7 @@ export async function mountGameEngine(
 
   const initialSave = loadSaveData();
   soundEngine.setEnabled(initialSave.soundEnabled);
+  soundEngine.preload();
 
   const isSoftwareGl = detectSoftwareWebGL();
   const renderer = new THREE.WebGLRenderer({
@@ -139,9 +140,9 @@ export async function mountGameEngine(
   const dustPoints = new THREE.Points(dustGeo, dustMat);
   scene.add(dustPoints);
 
-  // Build procedural PBR textures, protagonist, and level
+  // Build procedural PBR textures, protagonist (real GLB with fallback), and level
   const textures: FacilityTextures = createFacilityTextures(renderer.capabilities.getMaxAnisotropy());
-  const playerRig: PlayerRig = createMaleProtagonist(textures.contactShadowTex, textures.jacketFabricColor);
+  const playerRig: PlayerRig = await loadProtagonistRig(textures.contactShadowTex, textures.jacketFabricColor);
   scene.add(playerRig.root);
   scene.add(playerRig.contactShadow);
 

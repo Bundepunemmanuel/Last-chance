@@ -1,14 +1,13 @@
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
-import { DRACOLoader } from 'three/examples/jsm/loaders/DRACOLoader.js';
 
 export type CharacterAnimState = 'idle' | 'walk' | 'run' | 'jump' | 'fall' | 'death';
 
 export interface PlayerRig {
   root: THREE.Group;
-  skeleton: THREE.Skeleton;
-  skinnedMesh: THREE.SkinnedMesh;
+  skeleton?: THREE.Skeleton;
+  skinnedMesh?: THREE.SkinnedMesh;
   mixer: THREE.AnimationMixer;
   headlamp: THREE.SpotLight;
   contactShadow: THREE.Mesh;
@@ -737,21 +736,188 @@ export function createSisterModel(): SisterRig {
   };
 }
 
-// Optional GLB Loader helper when custom Blender/Mixamo models are added under public/models/
-export async function loadCustomGlbCharacter(url: string): Promise<{
-  scene: THREE.Group;
-  mixer: THREE.AnimationMixer;
-  animations: THREE.AnimationClip[];
-}> {
-  const draco = new DRACOLoader();
-  draco.setDecoderPath('https://www.gstatic.com/draco/versioned/decoders/1.5.7/');
-  const loader = new GLTFLoader();
-  loader.setDRACOLoader(draco);
-  const gltf = await loader.loadAsync(url);
-  draco.dispose();
-  return {
-    scene: gltf.scene,
-    mixer: new THREE.AnimationMixer(gltf.scene),
-    animations: gltf.animations,
-  };
+// Real GLB Protagonist Loader (loads /models/The_Miami_Dealer.glb with procedural fallback)
+export async function loadProtagonistRig(
+  contactShadowTex: THREE.Texture,
+  jacketFabricTex: THREE.Texture,
+  url = '/models/The_Miami_Dealer.glb',
+): Promise<PlayerRig> {
+  try {
+    const loader = new GLTFLoader();
+    const gltf = await loader.loadAsync(url);
+    const model = gltf.scene;
+
+    // Normalize character height to 1.74m, align feet cleanly at Y = 0, and face -Z forward
+    const rawBox = new THREE.Box3().setFromObject(model);
+    const rawSize = new THREE.Vector3();
+    rawBox.getSize(rawSize);
+    const targetHeight = 1.74;
+    const uniformScale = rawSize.y > 0.1 ? targetHeight / rawSize.y : 1.0;
+
+    const modelHolder = new THREE.Group();
+    model.scale.setScalar(uniformScale);
+    model.position.y = -rawBox.min.y * uniformScale;
+    // Standard glTF/Mixamo characters face +Z; rotate PI around Y to face engine forward (-Z)
+    model.rotation.y = Math.PI;
+    modelHolder.add(model);
+
+    let primarySkinned: THREE.SkinnedMesh | undefined;
+    model.traverse((obj) => {
+      if ((obj as THREE.Mesh).isMesh) {
+        const mesh = obj as THREE.Mesh;
+        mesh.castShadow = true;
+        mesh.receiveShadow = true;
+        mesh.frustumCulled = false;
+        if (!primarySkinned && (obj as THREE.SkinnedMesh).isSkinnedMesh) {
+          primarySkinned = obj as THREE.SkinnedMesh;
+        }
+      }
+    });
+
+    const root = new THREE.Group();
+    root.add(modelHolder);
+
+    // Shoulder/chest tactical headlamp pointing -Z forward
+    const headlamp = new THREE.SpotLight(0xdbeafe, 2.6, 20, Math.PI / 4.2, 0.55, 1.6);
+    headlamp.position.set(-0.16, 1.38, -0.2);
+    headlamp.castShadow = false;
+    const lampTarget = new THREE.Object3D();
+    lampTarget.position.set(-0.08, 0.85, -6.5);
+    root.add(lampTarget);
+    headlamp.target = lampTarget;
+    root.add(headlamp);
+
+    // Contact shadow disc
+    const contactShadowMat = new THREE.MeshBasicMaterial({
+      map: contactShadowTex,
+      transparent: true,
+      opacity: 0.5,
+      depthWrite: false,
+    });
+    const contactShadowGeo = new THREE.PlaneGeometry(1.0, 1.0);
+    const contactShadow = new THREE.Mesh(contactShadowGeo, contactShadowMat);
+    contactShadow.rotation.x = -Math.PI / 2;
+    contactShadow.renderOrder = 2;
+
+    const mixer = new THREE.AnimationMixer(model);
+    const clips = gltf.animations;
+    const findClip = (patterns: RegExp[]): THREE.AnimationClip | undefined => {
+      for (const p of patterns) {
+        const found = clips.find((c) => p.test(c.name));
+        if (found) return found;
+      }
+      return clips[0];
+    };
+
+    const idleClip = findClip([/^idle$/i, /idle/i]);
+    const walkClip = findClip([/^walk$/i, /catwalk/i, /walk/i]);
+    const runClip = findClip([/^run$/i, /run/i]);
+    const jumpClip = findClip([/jump\s*start/i, /^jump$/i, /jump/i]);
+    const fallClip = findClip([/^jump$/i, /fall/i, /jump/i]);
+
+    const actions: Record<'idle' | 'walk' | 'run' | 'jump' | 'fall', THREE.AnimationAction | null> = {
+      idle: idleClip ? mixer.clipAction(idleClip) : null,
+      walk: walkClip ? mixer.clipAction(walkClip) : null,
+      run: runClip ? mixer.clipAction(runClip) : null,
+      jump: jumpClip ? mixer.clipAction(jumpClip) : null,
+      fall: fallClip ? mixer.clipAction(fallClip) : null,
+    };
+
+    if (actions.jump && jumpClip !== fallClip) {
+      actions.jump.setLoop(THREE.LoopOnce, 1);
+      actions.jump.clampWhenFinished = true;
+    }
+
+    let currentState: 'idle' | 'walk' | 'run' | 'jump' | 'fall' = 'idle';
+    actions.idle?.play();
+
+    const transitionTo = (next: 'idle' | 'walk' | 'run' | 'jump' | 'fall', fadeSeconds = 0.14) => {
+      if (next === currentState) return;
+      const prevAction = actions[currentState];
+      const nextAction = actions[next];
+      if (!nextAction) return;
+      nextAction.reset();
+      nextAction.play();
+      if (prevAction && prevAction !== nextAction) {
+        prevAction.crossFadeTo(nextAction, fadeSeconds, true);
+      }
+      currentState = next;
+    };
+
+    const updateAnimation = (
+      dt: number,
+      speed: number,
+      maxSpeed: number,
+      grounded: boolean,
+      vy: number,
+      dead: boolean,
+    ) => {
+      if (dead) {
+        // Collapse forward/backward dramatically when killed
+        modelHolder.rotation.x = THREE.MathUtils.damp(modelHolder.rotation.x, -Math.PI * 0.45, 11, dt);
+        modelHolder.position.y = THREE.MathUtils.damp(modelHolder.position.y, 0.18, 11, dt);
+        return;
+      }
+
+      if (modelHolder.rotation.x !== 0 || modelHolder.position.y !== 0) {
+        modelHolder.rotation.x = 0;
+        modelHolder.position.y = 0;
+      }
+
+      if (!grounded) {
+        transitionTo(vy > 0.6 ? 'jump' : 'fall', 0.1);
+        mixer.update(dt);
+        return;
+      }
+
+      const norm = Math.min(1, speed / Math.max(0.1, maxSpeed));
+      if (norm < 0.06) {
+        transitionTo('idle', 0.18);
+        if (actions.idle) actions.idle.timeScale = 1;
+      } else if (norm < 0.58) {
+        transitionTo('walk', 0.14);
+        if (actions.walk) actions.walk.timeScale = 0.8 + norm * 0.8;
+      } else {
+        transitionTo('run', 0.12);
+        if (actions.run) actions.run.timeScale = 0.85 + norm * 0.4;
+      }
+      mixer.update(dt);
+    };
+
+    return {
+      root,
+      skeleton: primarySkinned?.skeleton,
+      skinnedMesh: primarySkinned,
+      mixer,
+      headlamp,
+      contactShadow,
+      updateAnimation,
+      dispose: () => {
+        mixer.stopAllAction();
+        contactShadowGeo.dispose();
+        contactShadowMat.dispose();
+        model.traverse((obj) => {
+          if ((obj as THREE.Mesh).isMesh) {
+            const mesh = obj as THREE.Mesh;
+            mesh.geometry?.dispose();
+            const mats = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
+            mats.forEach((m) => {
+              if (!m) return;
+              const std = m as THREE.MeshStandardMaterial;
+              std.map?.dispose();
+              std.normalMap?.dispose();
+              std.roughnessMap?.dispose();
+              std.metalnessMap?.dispose();
+              std.emissiveMap?.dispose();
+              std.aoMap?.dispose();
+              m.dispose();
+            });
+          }
+        });
+      },
+    };
+  } catch (err) {
+    console.warn('Falling back to procedural protagonist rig:', err);
+    return createMaleProtagonist(contactShadowTex, jacketFabricTex);
+  }
 }

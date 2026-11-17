@@ -1,10 +1,79 @@
-// 100% Procedural Offline TikTok Meme-Style Sound Engine (Web Audio API)
+// 100% Offline Meme Sound Engine (Real Meme Clips + Procedural Web Audio Fallbacks)
+
+type MemeClipKey = 'meme_ahh' | 'meme_faaah';
+
+const MEME_CLIP_PATHS: Record<MemeClipKey, string> = {
+  meme_ahh: '/audio/meme_ahh.mp3',
+  meme_faaah: '/audio/meme_faaah.mp3',
+};
 
 class SoundEngine {
   private ctx: AudioContext | null = null;
   private enabled = true;
   private noiseBuffer: AudioBuffer | null = null;
   private deathVariant = 0;
+
+  private rawBuffers = new Map<MemeClipKey, ArrayBuffer>();
+  private decodedBuffers = new Map<MemeClipKey, AudioBuffer>();
+  private preloaded = false;
+
+  public preload(): void {
+    if (this.preloaded) return;
+    this.preloaded = true;
+    (Object.keys(MEME_CLIP_PATHS) as MemeClipKey[]).forEach((key) => {
+      void this.fetchClipBytes(key);
+    });
+  }
+
+  private async fetchClipBytes(key: MemeClipKey): Promise<void> {
+    try {
+      const res = await fetch(MEME_CLIP_PATHS[key]);
+      if (!res.ok) return;
+      const bytes = await res.arrayBuffer();
+      this.rawBuffers.set(key, bytes);
+      if (this.ctx) {
+        void this.decodeClip(key, bytes);
+      }
+    } catch {
+      // Fall back cleanly to procedural meme synthesis
+    }
+  }
+
+  private async decodeClip(key: MemeClipKey, bytes: ArrayBuffer): Promise<void> {
+    if (!this.ctx || this.decodedBuffers.has(key)) return;
+    try {
+      const copy = bytes.slice(0);
+      const decoded = await this.ctx.decodeAudioData(copy);
+      this.decodedBuffers.set(key, decoded);
+    } catch {
+      // Ignore decode failure; procedural fallback handles playback
+    }
+  }
+
+  private playDecodedClip(key: MemeClipKey, volume = 0.85, playbackRate = 1.0): boolean {
+    const ctx = this.ensureContext();
+    if (!ctx) return false;
+    const buffer = this.decodedBuffers.get(key);
+    if (!buffer) {
+      const raw = this.rawBuffers.get(key);
+      if (raw) {
+        void this.decodeClip(key, raw);
+      }
+      return false;
+    }
+
+    const src = ctx.createBufferSource();
+    src.buffer = buffer;
+    src.playbackRate.setValueAtTime(playbackRate, ctx.currentTime);
+
+    const gain = ctx.createGain();
+    gain.gain.setValueAtTime(volume, ctx.currentTime);
+
+    src.connect(gain);
+    gain.connect(ctx.destination);
+    src.start(ctx.currentTime);
+    return true;
+  }
 
   public setEnabled(enabled: boolean): void {
     this.enabled = enabled;
@@ -15,6 +84,7 @@ class SoundEngine {
   }
 
   public unlock(): void {
+    this.preload();
     if (!this.enabled) return;
     if (!this.ctx) {
       const AudioCtx =
@@ -23,6 +93,9 @@ class SoundEngine {
       if (AudioCtx) {
         this.ctx = new AudioCtx();
         this.createNoiseBuffer();
+        this.rawBuffers.forEach((bytes, key) => {
+          void this.decodeClip(key, bytes);
+        });
       }
     }
     if (this.ctx && this.ctx.state === 'suspended') {
@@ -181,8 +254,12 @@ class SoundEngine {
     osc.stop(now + 0.15);
   }
 
-  // Rubber-chicken squeak + snap when spikes shoot up
+  // Plays the user's "anime ahh" meme clip when spikes pop out! (with rubber-chicken synth fallback)
   public playSpikeSnap(): void {
+    if (this.playDecodedClip('meme_ahh', 0.9, 1.0)) {
+      return;
+    }
+
     const ctx = this.ensureContext();
     if (!ctx) return;
     const now = ctx.currentTime;
@@ -231,7 +308,6 @@ class SoundEngine {
     if (!ctx) return;
     const now = ctx.currentTime;
 
-    // Two detuned sawtooth waves for classic game-show wrong buzzer
     for (const freq of [138, 146]) {
       const osc = ctx.createOscillator();
       const gain = ctx.createGain();
@@ -251,7 +327,7 @@ class SoundEngine {
     this.triggerVineBoom(ctx, now + 0.04, 0.28);
   }
 
-  // Sparkly Taco-Bell/Ding-Dong + upbeat chime on Checkpoint
+  // Sparkly Ding-Dong chime on Checkpoint
   public playCheckpoint(): void {
     const ctx = this.ensureContext();
     if (!ctx) return;
@@ -272,10 +348,7 @@ class SoundEngine {
     });
   }
 
-  // Cycles funny TikTok meme death SFX:
-  // 0: Vine Boom + Sad Trombone ("Wah-wah-waaaah")
-  // 1: Taco Bell Gong + Coconut Bonk
-  // 2: Cartoon Slip Slide-Whistle + Vine Boom
+  // Plays user's "FAAAH!" meme scream (with Vine Boom punch) on Death, alternating meme clips!
   public playDeath(): void {
     const ctx = this.ensureContext();
     if (!ctx) return;
@@ -283,6 +356,17 @@ class SoundEngine {
     const mode = this.deathVariant % 3;
     this.deathVariant += 1;
 
+    // Prioritize the uploaded "FAAAH!" meme on most deaths (modes 0 & 1) and "ahh" on mode 2
+    if (mode !== 2 && this.playDecodedClip('meme_faaah', 0.92, mode === 1 ? 0.95 : 1.02)) {
+      this.triggerVineBoom(ctx, now, 0.2);
+      return;
+    }
+    if (mode === 2 && this.playDecodedClip('meme_ahh', 0.92, 1.0)) {
+      this.triggerVineBoom(ctx, now + 0.08, 0.24);
+      return;
+    }
+
+    // Procedural fallback if audio buffers are still decoding
     if (mode === 0) {
       this.triggerVineBoom(ctx, now, 0.32);
       const notes = [
@@ -314,7 +398,6 @@ class SoundEngine {
         osc.stop(start + n.d + 0.02);
       });
     } else if (mode === 1) {
-      // Taco Bell bell dong + comedic bonk
       const bonk = ctx.createOscillator();
       const bGain = ctx.createGain();
       bonk.type = 'sine';
@@ -326,22 +409,7 @@ class SoundEngine {
       bGain.connect(ctx.destination);
       bonk.start(now);
       bonk.stop(now + 0.1);
-
-      const partials = [164.81, 247.0, 329.63, 494.0];
-      partials.forEach((freq, i) => {
-        const bell = ctx.createOscillator();
-        const g = ctx.createGain();
-        bell.type = i === 0 ? 'triangle' : 'sine';
-        bell.frequency.setValueAtTime(freq, now + 0.06);
-        g.gain.setValueAtTime(0.14 / (i + 1), now + 0.06);
-        g.gain.exponentialRampToValueAtTime(0.001, now + 0.85);
-        bell.connect(g);
-        g.connect(ctx.destination);
-        bell.start(now + 0.06);
-        bell.stop(now + 0.88);
-      });
     } else {
-      // Cartoon slip whistle + Vine Boom splat
       const slide = ctx.createOscillator();
       const sGain = ctx.createGain();
       slide.type = 'sine';
@@ -353,7 +421,6 @@ class SoundEngine {
       sGain.connect(ctx.destination);
       slide.start(now);
       slide.stop(now + 0.27);
-
       this.triggerVineBoom(ctx, now + 0.22, 0.34);
     }
   }
@@ -399,6 +466,7 @@ class SoundEngine {
   }
 
   public dispose(): void {
+    this.decodedBuffers.clear();
     if (this.ctx) {
       void this.ctx.close();
       this.ctx = null;
