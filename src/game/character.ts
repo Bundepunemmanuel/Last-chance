@@ -369,49 +369,66 @@ export function createSisterModel(): SisterRig {
   const bootMat = trackMat(new THREE.MeshStandardMaterial({ color: 0x171717, roughness: 0.45, metalness: 0.1 }));
 
   const root = new THREE.Group();
+  const bodyGroup = new THREE.Group();
+  root.add(bodyGroup);
 
   // Legs (shorter younger sister proportions ~1.35m)
   for (const side of [-1, 1]) {
     const leg = new THREE.Mesh(trackGeo(new THREE.BoxGeometry(0.11, 0.54, 0.11)), pantsMat);
     leg.position.set(side * 0.08, 0.34, 0);
-    root.add(leg);
+    leg.castShadow = true;
+    bodyGroup.add(leg);
     const boot = new THREE.Mesh(trackGeo(new THREE.BoxGeometry(0.12, 0.1, 0.16)), bootMat);
     boot.position.set(side * 0.08, 0.05, 0.02);
-    root.add(boot);
+    bodyGroup.add(boot);
   }
 
   // Torso coat
   const torso = new THREE.Mesh(trackGeo(new THREE.BoxGeometry(0.3, 0.44, 0.19)), coatMat);
   torso.position.set(0, 0.82, 0);
-  root.add(torso);
+  torso.castShadow = true;
+  bodyGroup.add(torso);
 
-  // Head + ponytail
+  // Head + hair
   const head = new THREE.Mesh(trackGeo(new THREE.BoxGeometry(0.18, 0.2, 0.19)), skinMat);
   head.position.set(0, 1.18, 0);
-  root.add(head);
+  head.castShadow = true;
+  bodyGroup.add(head);
 
   const hair = new THREE.Mesh(trackGeo(new THREE.BoxGeometry(0.2, 0.12, 0.21)), hairMat);
   hair.position.set(0, 1.24, -0.01);
-  root.add(hair);
+  bodyGroup.add(hair);
 
-  // Left arm down, Right arm waving
+  // Left arm down, Right arm waving with small cyan signal flare
   const leftArm = new THREE.Mesh(trackGeo(new THREE.BoxGeometry(0.085, 0.36, 0.085)), coatMat);
   leftArm.position.set(-0.2, 0.8, 0);
-  root.add(leftArm);
+  bodyGroup.add(leftArm);
 
   const rightArmPivot = new THREE.Group();
   rightArmPivot.position.set(0.2, 0.98, 0);
-  root.add(rightArmPivot);
+  bodyGroup.add(rightArmPivot);
 
   const rightArm = new THREE.Mesh(trackGeo(new THREE.BoxGeometry(0.085, 0.36, 0.085)), coatMat);
   rightArm.position.set(0, 0.14, 0);
   rightArmPivot.add(rightArm);
 
+  const beaconMat = trackMat(
+    new THREE.MeshStandardMaterial({
+      color: 0x38bdf8,
+      emissive: 0x38bdf8,
+      emissiveIntensity: 2.4,
+      roughness: 0.2,
+    }),
+  );
+  const handBeacon = new THREE.Mesh(trackGeo(new THREE.SphereGeometry(0.065, 8, 8)), beaconMat);
+  handBeacon.position.set(0, 0.34, 0);
+  rightArmPivot.add(handBeacon);
+
   return {
     root,
     update: (elapsed: number) => {
       rightArmPivot.rotation.z = -2.45 + Math.sin(elapsed * 5.2) * 0.32;
-      root.position.y = Math.abs(Math.sin(elapsed * 2.6)) * 0.03;
+      bodyGroup.position.y = Math.abs(Math.sin(elapsed * 2.6)) * 0.03;
     },
     dispose: () => {
       geometries.forEach((g) => g.dispose());
