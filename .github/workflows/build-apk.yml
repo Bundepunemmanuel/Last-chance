@@ -71,7 +71,7 @@ jobs:
             fi
           fi
           echo "has_release_keystore=false" >> "$GITHUB_OUTPUT"
-          echo "::warning::Release keystore secrets not set; building debug APK with assembleDebug. Configure ANDROID_KEYSTORE_* secrets for persistent production release signing."
+          echo "Using committed ci-debug.p12 persistent debug keystore for consistent in-place updates."
 
       - name: 8. Compute monotonic version metadata
         id: version
@@ -98,7 +98,7 @@ jobs:
           ./gradlew assembleRelease -PVERSION_CODE=${{ steps.version.outputs.version_code }} --no-daemon
           cp app/build/outputs/apk/release/last-chance.apk ../last-chance.apk
 
-      - name: 9b. Build debug APK fallback (./gradlew assembleDebug)
+      - name: 9b. Build consistently signed debug APK (./gradlew assembleDebug + ci-debug.p12)
         if: steps.keystore.outputs.has_release_keystore != 'true'
         working-directory: android
         run: |
@@ -106,8 +106,13 @@ jobs:
           ./gradlew assembleDebug -PVERSION_CODE=${{ steps.version.outputs.version_code }} --no-daemon
           cp app/build/outputs/apk/debug/app-debug.apk ../last-chance.apk
 
-      - name: 10. Verify last-chance.apk
-        run: ls -lh last-chance.apk
+      - name: 10. Verify last-chance.apk and signing certificate
+        run: |
+          ls -lh last-chance.apk
+          APKSIGNER=$(find "${ANDROID_HOME:-/usr/local/lib/android/sdk}/build-tools" -name apksigner 2>/dev/null | head -n 1)
+          if [ -n "$APKSIGNER" ]; then
+            "$APKSIGNER" verify --print-certs last-chance.apk
+          fi
 
       - name: 11. Upload last-chance.apk workflow artifact
         uses: actions/upload-artifact@v4

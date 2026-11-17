@@ -11,6 +11,7 @@ coverage/
 *.jks
 *.keystore
 *.p12
+!android/app/ci-debug.p12
 *.pem
 keystore.properties
 android/.gradle/

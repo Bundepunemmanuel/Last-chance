@@ -28,6 +28,12 @@ android {
                 storePassword System.getenv("LASTCHANCE_STORE_PASSWORD")
                 keyAlias System.getenv("LASTCHANCE_KEY_ALIAS")
                 keyPassword System.getenv("LASTCHANCE_KEY_PASSWORD")
+            } else {
+                storeFile file("ci-debug.p12")
+                storeType "PKCS12"
+                storePassword "android"
+                keyAlias "androiddebugkey"
+                keyPassword "android"
             }
         }
         debug {
@@ -37,21 +43,23 @@ android {
                 storePassword System.getenv("LASTCHANCE_STORE_PASSWORD")
                 keyAlias System.getenv("LASTCHANCE_KEY_ALIAS")
                 keyPassword System.getenv("LASTCHANCE_KEY_PASSWORD")
+            } else {
+                storeFile file("ci-debug.p12")
+                storeType "PKCS12"
+                storePassword "android"
+                keyAlias "androiddebugkey"
+                keyPassword "android"
             }
         }
     }
     buildTypes {
         debug {
-            if (System.getenv("LASTCHANCE_STORE_FILE")) {
-                signingConfig signingConfigs.debug
-            }
+            signingConfig signingConfigs.debug
         }
         release {
             minifyEnabled false
             proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
-            if (System.getenv("LASTCHANCE_STORE_FILE")) {
-                signingConfig signingConfigs.release
-            }
+            signingConfig signingConfigs.release
         }
     }
     applicationVariants.all { variant ->
