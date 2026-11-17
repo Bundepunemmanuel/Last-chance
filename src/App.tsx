@@ -1,8 +1,9 @@
 import { useEffect, useRef, useState } from 'react';
-import { Pause, RotateCcw, Volume2, VolumeX, Play, Flag, ShieldAlert, CheckCircle2 } from 'lucide-react';
+import { Pause, RotateCcw, Volume2, VolumeX, Play, Flag, ShieldAlert, CheckCircle2, Download, X } from 'lucide-react';
 import { ScreenOrientation } from '@capacitor/screen-orientation';
 import { mountGameEngine, type GameEngineHandle } from './game/engine';
 import { loadSaveData, resetProgressSave } from './game/storage';
+import { useAppUpdater } from './game/updater';
 import type { GraphicsQuality, HudState, SaveData, VirtualInputState } from './game/types';
 import { TouchControls } from './components/TouchControls';
 
@@ -43,6 +44,13 @@ export default function App() {
   const [engineReady, setEngineReady] = useState(false);
   const [contextLost, setContextLost] = useState(false);
   const [isPortraitMobile, setIsPortraitMobile] = useState(false);
+
+  const {
+    appUpdateInfo,
+    isDownloadingUpdate,
+    triggerOneTapUpdate,
+    dismissUpdateBanner,
+  } = useAppUpdater();
 
   // Enforce landscape orientation on native Capacitor Android & monitor viewport aspect
   useEffect(() => {
@@ -277,6 +285,48 @@ export default function App() {
             <p className="mt-3 text-sm leading-relaxed text-slate-300">
               Your younger sister is trapped inside the decommissioned Bio-Containment Wing. Cross the facility corridor—watch every floor seam, catwalk plate, and even the exit signs.
             </p>
+
+            {/* One-Tap In-App Update Banner (GitHub Releases) */}
+            {appUpdateInfo?.hasUpdate && (
+              <div className="mt-4 flex items-center justify-between gap-3 rounded-xl border border-sky-500/60 bg-[#0b1824]/95 px-4 py-3">
+                <button
+                  type="button"
+                  onClick={triggerOneTapUpdate}
+                  disabled={isDownloadingUpdate}
+                  className="flex flex-1 items-center gap-3 text-left focus-visible:outline-2 focus-visible:outline-sky-400"
+                >
+                  <Download className="h-5 w-5 shrink-0 text-sky-400" />
+                  <div className="min-w-0">
+                    <p className="truncate text-xs font-semibold text-sky-100">
+                      New version available! ({appUpdateInfo.latestVersionName})
+                    </p>
+                    <p className="truncate text-[11px] text-sky-300/80">
+                      {isDownloadingUpdate
+                        ? 'Downloading update package...'
+                        : 'Tap to download and install over your current version'}
+                    </p>
+                  </div>
+                </button>
+                <div className="flex shrink-0 items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={triggerOneTapUpdate}
+                    disabled={isDownloadingUpdate}
+                    className="rounded-lg bg-sky-500 px-3.5 py-2 text-xs font-bold text-slate-950 transition-colors hover:bg-sky-400 disabled:opacity-60"
+                  >
+                    {isDownloadingUpdate ? 'Updating...' : 'Update'}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={dismissUpdateBanner}
+                    aria-label="Dismiss update banner"
+                    className="flex h-8 w-8 items-center justify-center rounded-lg text-slate-400 hover:bg-slate-800 hover:text-slate-200"
+                  >
+                    <X className="h-4 w-4" />
+                  </button>
+                </div>
+              </div>
+            )}
 
             {/* Primary Actions */}
             <div className="mt-6 flex flex-wrap items-center gap-3">

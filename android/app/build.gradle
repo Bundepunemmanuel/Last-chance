@@ -1,4 +1,5 @@
 apply plugin: 'com.android.application'
+apply plugin: 'kotlin-android'
 
 android {
     namespace = "com.lastchance.game"
@@ -16,6 +17,9 @@ android {
             ignoreAssetsPattern = '!.svn:!.git:!.ds_store:!*.scc:.*:!CVS:!thumbs.db:!picasa.ini:!*~'
         }
     }
+    kotlinOptions {
+        jvmTarget = '21'
+    }
     signingConfigs {
         release {
             def envStoreFile = System.getenv("LASTCHANCE_STORE_FILE")
@@ -26,8 +30,22 @@ android {
                 keyPassword System.getenv("LASTCHANCE_KEY_PASSWORD")
             }
         }
+        debug {
+            def envStoreFile = System.getenv("LASTCHANCE_STORE_FILE")
+            if (envStoreFile) {
+                storeFile file(envStoreFile)
+                storePassword System.getenv("LASTCHANCE_STORE_PASSWORD")
+                keyAlias System.getenv("LASTCHANCE_KEY_ALIAS")
+                keyPassword System.getenv("LASTCHANCE_KEY_PASSWORD")
+            }
+        }
     }
     buildTypes {
+        debug {
+            if (System.getenv("LASTCHANCE_STORE_FILE")) {
+                signingConfig signingConfigs.debug
+            }
+        }
         release {
             minifyEnabled false
             proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
@@ -56,6 +74,7 @@ dependencies {
     implementation "androidx.appcompat:appcompat:$androidxAppCompatVersion"
     implementation "androidx.coordinatorlayout:coordinatorlayout:$androidxCoordinatorLayoutVersion"
     implementation "androidx.core:core-splashscreen:$coreSplashScreenVersion"
+    implementation "org.jetbrains.kotlinx:kotlinx-coroutines-android:1.9.0"
     implementation project(':capacitor-android')
     testImplementation "junit:junit:$junitVersion"
     androidTestImplementation "androidx.test.ext:junit:$androidxJunitVersion"

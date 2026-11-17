@@ -1,4 +1,4 @@
-name: Build Signed Android APK
+name: Build and Release Android APK
 
 on:
   push:
@@ -10,6 +10,9 @@ on:
         description: 'Optional versionCode offset (defaults to 0)'
         required: false
         default: '0'
+
+permissions:
+  contents: write
 
 jobs:
   build-android-apk:
@@ -45,24 +48,38 @@ jobs:
       - name: 6b. Configure Android SDK
         uses: android-actions/setup-android@v3
 
-      - name: 7. Restore persistent signing keystore from GitHub Secrets
+      - name: 7. Restore persistent signing keystore if configured
+        id: keystore
         env:
           ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
           ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
           ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
           ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
         run: |
-          if [ -z "$ANDROID_KEYSTORE_BASE64" ] || [ -z "$ANDROID_KEYSTORE_PASSWORD" ] || [ -z "$ANDROID_KEY_ALIAS" ] || [ -z "$ANDROID_KEY_PASSWORD" ]; then
-            echo "::error::Missing persistent signing secrets. Configure ANDROID_KEYSTORE_BASE64, ANDROID_KEYSTORE_PASSWORD, ANDROID_KEY_ALIAS, and ANDROID_KEY_PASSWORD in GitHub Repository Secrets."
-            exit 1
+          if [ -n "$ANDROID_KEYSTORE_BASE64" ] && [ -n "$ANDROID_KEYSTORE_PASSWORD" ] && [ -n "$ANDROID_KEY_ALIAS" ] && [ -n "$ANDROID_KEY_PASSWORD" ]; then
+            echo "$ANDROID_KEYSTORE_BASE64" | base64 --decode > android/app/release-keystore.jks
+            if [ -s android/app/release-keystore.jks ]; then
+              echo "has_release_keystore=true" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
           fi
-          echo "$ANDROID_KEYSTORE_BASE64" | base64 --decode > android/app/release-keystore.jks
-          if [ ! -s android/app/release-keystore.jks ]; then
-            echo "::error::Decoded keystore is empty or invalid."
-            exit 1
-          fi
+          echo "has_release_keystore=false" >> "$GITHUB_OUTPUT"
+          echo "::warning::Release keystore secrets not set; building debug APK with assembleDebug. Configure ANDROID_KEYSTORE_* secrets for persistent production release signing."
 
-      - name: 8. Build signed Android release APK
+      - name: 8. Compute monotonic version metadata
+        id: version
+        run: |
+          OFFSET="${{ github.event.inputs.version_code_offset || '0' }}"
+          VERSION_CODE=$((GITHUB_RUN_NUMBER + OFFSET))
+          VERSION_NAME="1.0.${VERSION_CODE}"
+          TAG_NAME="v${VERSION_NAME}"
+          echo "version_code=${VERSION_CODE}" >> "$GITHUB_OUTPUT"
+          echo "version_name=${VERSION_NAME}" >> "$GITHUB_OUTPUT"
+          echo "tag_name=${TAG_NAME}" >> "$GITHUB_OUTPUT"
+          echo "Building com.lastchance.game versionCode=${VERSION_CODE} versionName=${VERSION_NAME} tag=${TAG_NAME}"
+
+      - name: 9a. Build signed release APK (when persistent keystore secrets are present)
+        if: steps.keystore.outputs.has_release_keystore == 'true'
         working-directory: android
         env:
           LASTCHANCE_STORE_FILE: release-keystore.jks
@@ -71,31 +88,36 @@ jobs:
           LASTCHANCE_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
         run: |
           chmod +x gradlew
-          OFFSET="${{ github.event.inputs.version_code_offset || '0' }}"
-          VERSION_CODE=$((1 + GITHUB_RUN_NUMBER + OFFSET))
-          echo "Building com.lastchance.game with monotonic versionCode=$VERSION_CODE"
-          ./gradlew assembleRelease -PVERSION_CODE=$VERSION_CODE --no-daemon
+          ./gradlew assembleRelease -PVERSION_CODE=${{ steps.version.outputs.version_code }} --no-daemon
+          cp app/build/outputs/apk/release/last-chance.apk ../last-chance.apk
 
-      - name: 9. Verify APK output filename (last-chance.apk)
+      - name: 9b. Build debug APK fallback (./gradlew assembleDebug)
+        if: steps.keystore.outputs.has_release_keystore != 'true'
+        working-directory: android
         run: |
-          APK_DIR="android/app/build/outputs/apk/release"
-          ls -la "$APK_DIR"
-          if [ ! -f "$APK_DIR/last-chance.apk" ]; then
-            FOUND_APK=$(find "$APK_DIR" -maxdepth 1 -name "*.apk" | head -n 1)
-            if [ -z "$FOUND_APK" ]; then
-              echo "::error::No release APK found in $APK_DIR"
-              exit 1
-            fi
-            cp "$FOUND_APK" "$APK_DIR/last-chance.apk"
-          fi
-          test -f "$APK_DIR/last-chance.apk"
+          chmod +x gradlew
+          ./gradlew assembleDebug -PVERSION_CODE=${{ steps.version.outputs.version_code }} --no-daemon
+          cp app/build/outputs/apk/debug/app-debug.apk ../last-chance.apk
 
-      - name: 10. Upload last-chance.apk artifact
+      - name: 10. Verify last-chance.apk
+        run: ls -lh last-chance.apk
+
+      - name: 11. Upload last-chance.apk workflow artifact
         uses: actions/upload-artifact@v4
         with:
           name: last-chance-apk
-          path: android/app/build/outputs/apk/release/last-chance.apk
+          path: last-chance.apk
           if-no-files-found: error
+
+      - name: 12. Publish last-chance.apk to GitHub Releases
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.version.outputs.tag_name }}
+          name: "LAST CHANCE ${{ steps.version.outputs.tag_name }}"
+          body: "Automated build of LAST CHANCE (${{ steps.version.outputs.tag_name }}, versionCode ${{ steps.version.outputs.version_code }})."
+          files: last-chance.apk
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Clean up temporary keystore
         if: always()
