@@ -6,6 +6,8 @@ const CURRENT_SAVE_VERSION = 1;
 const DEFAULT_SAVE: SaveData = {
   version: CURRENT_SAVE_VERSION,
   unlockedSector: 1,
+  selectedSector: 1,
+  clearedSectors: [],
   bestTimeMs: null,
   totalDeaths: 0,
   totalRuns: 0,
@@ -28,9 +30,15 @@ export function loadSaveData(): SaveData {
         ? parsed.graphicsQuality
         : DEFAULT_SAVE.graphicsQuality;
 
+    const cleared = Array.isArray(parsed.clearedSectors)
+      ? parsed.clearedSectors.filter((n): n is number => typeof n === 'number' && n >= 1 && n <= 5)
+      : [];
+
     return {
       version: CURRENT_SAVE_VERSION,
-      unlockedSector: typeof parsed.unlockedSector === 'number' ? Math.max(1, parsed.unlockedSector) : 1,
+      unlockedSector: typeof parsed.unlockedSector === 'number' ? Math.min(5, Math.max(1, parsed.unlockedSector)) : 1,
+      selectedSector: typeof parsed.selectedSector === 'number' ? Math.min(5, Math.max(1, parsed.selectedSector)) : 1,
+      clearedSectors: cleared,
       bestTimeMs: typeof parsed.bestTimeMs === 'number' ? parsed.bestTimeMs : null,
       totalDeaths: typeof parsed.totalDeaths === 'number' ? Math.max(0, parsed.totalDeaths) : 0,
       totalRuns: typeof parsed.totalRuns === 'number' ? Math.max(0, parsed.totalRuns) : 0,

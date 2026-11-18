@@ -62,6 +62,8 @@ export interface LevelInstance {
   sisterRig: SisterRig;
   introSisterRig: SisterRig;
   emergencyLights: THREE.PointLight[];
+  atmosphere?: { fogHex: number; keyHex: number; rimHex: number };
+  getPlatformDelta?: (colliderHandle: number) => { x: number; y: number; z: number } | null;
   updateAmbient: (dt: number) => void;
   setShutterProgress: (progress: number) => void;
   update: (

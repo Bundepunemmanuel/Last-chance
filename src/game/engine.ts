@@ -3,7 +3,8 @@ import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment
 import RAPIER from '@dimforge/rapier3d-compat';
 import { createFacilityTextures, type FacilityTextures } from './textures';
 import { createMaleProtagonist, type PlayerRig } from './character';
-import { buildSectorOneLevel, type LevelInstance } from './levelOne';
+import { type LevelInstance } from './levelOne';
+import { buildSectorLevel, getSectorMeta, SECTORS } from './levels';
 import { soundEngine } from './audio';
 import { loadSaveData, updateSaveData } from './storage';
 import type { GamePhase, GraphicsQuality, HudState, MovementMode, VirtualInputState } from './types';
@@ -32,6 +33,8 @@ function detectSoftwareWebGL(): boolean {
 
 export interface GameEngineHandle {
   startNewRun: (fromCheckpoint?: boolean) => void;
+  selectSector: (sectorId: number) => void;
+  playNextSector: () => void;
   skipIntro: () => void;
   restartFromCheckpoint: () => void;
   restartFullLevel: () => void;
@@ -147,27 +150,56 @@ export async function mountGameEngine(
   scene.add(playerRig.root);
   scene.add(playerRig.contactShadow);
 
-  // Rapier Physics World & Level
-  const world = new RAPIER.World({ x: 0, y: -22.0, z: 0 });
-  const level: LevelInstance = buildSectorOneLevel(RAPIER, world, textures);
-  scene.add(level.group);
+  // Rapier Physics World & Active Sector Level
+  let currentSector = Math.min(SECTORS.length, Math.max(1, initialSave.selectedSector));
+  let world!: RAPIER.World;
+  let level!: LevelInstance;
+  let playerBody!: RAPIER.RigidBody;
+  let playerCollider!: RAPIER.Collider;
+  let characterController!: RAPIER.KinematicCharacterController;
 
-  // If player previously unlocked checkpoint in this session/save, keep fresh run option vs checkpoint
   const playerRadius = 0.3;
   const playerHalfHeight = 0.55; // Total capsule height = 1.70m; center at +0.85 above feet
-  const playerBody = world.createRigidBody(
-    RAPIER.RigidBodyDesc.kinematicPositionBased().setTranslation(level.spawnPos.x, level.spawnPos.y, level.spawnPos.z),
-  );
-  const playerCollider = world.createCollider(
-    RAPIER.ColliderDesc.capsule(playerHalfHeight, playerRadius),
-    playerBody,
-  );
-  const characterController = world.createCharacterController(0.04);
-  characterController.enableAutostep(0.32, 0.14, true);
-  characterController.enableSnapToGround(0.24);
-  characterController.setMaxSlopeClimbAngle((45 * Math.PI) / 180);
-  characterController.setMinSlopeSlideAngle((52 * Math.PI) / 180);
-  characterController.setSlideEnabled(true);
+
+  const applySectorAtmosphere = (lvl: LevelInstance) => {
+    const fogHex = lvl.atmosphere?.fogHex ?? 0x0c1118;
+    const keyHex = lvl.atmosphere?.keyHex ?? 0xffe4c4;
+    const rimHex = lvl.atmosphere?.rimHex ?? 0x38bdf8;
+    scene.background = new THREE.Color(fogHex);
+    scene.fog = new THREE.FogExp2(fogHex, 0.025);
+    keyLight.color.setHex(keyHex);
+    rimLight.color.setHex(rimHex);
+  };
+
+  const buildWorldAndSector = (sectorId: number) => {
+    if (characterController) characterController.free();
+    if (world) world.free();
+    if (level) {
+      scene.remove(level.group);
+      level.dispose();
+    }
+
+    world = new RAPIER.World({ x: 0, y: -22.0, z: 0 });
+    level = buildSectorLevel(sectorId, RAPIER, world, textures);
+    scene.add(level.group);
+    applySectorAtmosphere(level);
+
+    playerBody = world.createRigidBody(
+      RAPIER.RigidBodyDesc.kinematicPositionBased().setTranslation(level.spawnPos.x, level.spawnPos.y, level.spawnPos.z),
+    );
+    playerCollider = world.createCollider(
+      RAPIER.ColliderDesc.capsule(playerHalfHeight, playerRadius),
+      playerBody,
+    );
+    characterController = world.createCharacterController(0.04);
+    characterController.enableAutostep(0.32, 0.14, true);
+    characterController.enableSnapToGround(0.24);
+    characterController.setMaxSlopeClimbAngle((45 * Math.PI) / 180);
+    characterController.setMinSlopeSlideAngle((52 * Math.PI) / 180);
+    characterController.setSlideEnabled(true);
+  };
+
+  buildWorldAndSector(currentSector);
 
   // Quality & Performance configuration
   let currentQuality: GraphicsQuality = initialSave.graphicsQuality;
@@ -230,6 +262,7 @@ export async function mountGameEngine(
   let jumpBufferTimer = 0;
   let prevJumpPressed = false;
   let grounded = true;
+  let lastGroundedHandle: number | null = null;
   let facingYaw = 0; // 0 faces -Z
   let deathTimer = 0;
   let deathReason: string | null = null;
@@ -272,20 +305,25 @@ export async function mountGameEngine(
   window.addEventListener('resize', onResize);
 
   const pushHud = (fpsValue: number) => {
-    let objective = 'Cross the containment corridor — reach the exit.';
+    const meta = getSectorMeta(currentSector);
+    let objective = `Cross ${meta.shortName} — reach the exit.`;
     if (level.fakeExitTriggered) {
-      objective = 'TRAP! Jump right to Airlock B-2 to reach your sister!';
+      objective = `TRAP! Reach ${meta.airlockLabel} to save your sister!`;
     } else if (checkpointActive) {
-      objective = 'Navigate the machinery gauntlet to the sector exit.';
+      objective = `Navigate the machinery gauntlet to ${meta.airlockLabel}.`;
     }
     onHudUpdate({
       phase,
+      currentSector,
+      totalSectors: SECTORS.length,
+      sectorTitle: meta.title,
       elapsedMs: elapsedRunMs,
       deaths: runDeaths,
       checkpointActive,
       fakeExitTriggered: level.fakeExitTriggered,
       objectiveText: objective,
       introSubtitle,
+      sisterQuote: phase === 'victory' ? 'Why the fuck did you take so long to rescue me?!' : null,
       trapBannerText,
       deathReason,
       movementMode,
@@ -392,8 +430,38 @@ export async function mountGameEngine(
     }
   };
 
+  const selectSector = (sectorId: number) => {
+    const clamped = Math.min(SECTORS.length, Math.max(1, sectorId));
+    if (clamped !== currentSector) {
+      currentSector = clamped;
+      checkpointActive = false;
+      updateSaveData({ selectedSector: clamped, checkpointReached: false });
+      buildWorldAndSector(currentSector);
+      applyGraphicsQuality(currentQuality);
+    } else {
+      level.resetTraps();
+    }
+    elapsedRunMs = 0;
+    runDeaths = 0;
+    lastGroundedHandle = null;
+    deathReason = null;
+    trapBannerText = null;
+    trapBannerTimer = 0;
+    introSubtitle = null;
+    placePlayerAt(level.spawnPos);
+    phase = 'title';
+    pushHud(currentFps);
+  };
+
+  const playNextSector = () => {
+    const nextId = currentSector < SECTORS.length ? currentSector + 1 : 1;
+    selectSector(nextId);
+    startNewRun(false);
+  };
+
   const returnToTitle = () => {
     level.resetTraps();
+    lastGroundedHandle = null;
     placePlayerAt(level.spawnPos);
     phase = 'title';
     pushHud(currentFps);
@@ -477,6 +545,7 @@ export async function mountGameEngine(
       playerRig.updateAnimation(dt, 0, 6.6, true, 0, false);
       level.updateAmbient(dt);
 
+      const meta = getSectorMeta(currentSector);
       if (introTimer < 2.3) {
         introSubtitle = "Wait behind the glass — I'm coming to get you!";
         _desiredCamPos.set(-1.6, 1.55, 0.2 - introTimer * 0.55);
@@ -487,12 +556,12 @@ export async function mountGameEngine(
           soundEngine.playIntroLockdown();
         }
         level.setShutterProgress((introTimer - 2.3) / 1.5);
-        introSubtitle = 'Containment lockdown triggered — the blast door is sealing!';
+        introSubtitle = meta.introLockdownLine;
         _desiredCamPos.set(0.85, 2.25, 2.6);
         _desiredLookAt.set(-1.1, 1.2, -0.4);
       } else {
         level.setShutterProgress(1);
-        introSubtitle = "Don't trust a single floor plate. Reach Airlock B-2!";
+        introSubtitle = meta.introFinalLine;
         _desiredCamPos.set(_playerPos.x * 0.72, Math.max(1.2, _playerPos.y + 3.45), _playerPos.z + 6.3);
         _desiredLookAt.set(_playerPos.x * 0.85, _playerPos.y + 1.05, _playerPos.z - 2.6);
       }
@@ -596,6 +665,7 @@ export async function mountGameEngine(
     // 2. Fixed-step Rapier Physics Integration
     physicsAccumulator = Math.min(0.1, physicsAccumulator + dt);
     let groundedHandle: number | null = null;
+    let carryAppliedThisFrame = false;
 
     while (physicsAccumulator >= fixedDt) {
       physicsAccumulator -= fixedDt;
@@ -607,9 +677,19 @@ export async function mountGameEngine(
         velocityY = -2.2; // Gentle downward snap to stay glued to moving/stepped platforms
       }
 
-      const desiredX = _moveDir.x * targetSpeed * fixedDt;
-      const desiredZ = _moveDir.z * targetSpeed * fixedDt;
-      const desiredY = velocityY * fixedDt;
+      let desiredX = _moveDir.x * targetSpeed * fixedDt;
+      let desiredZ = _moveDir.z * targetSpeed * fixedDt;
+      let desiredY = velocityY * fixedDt;
+
+      if (!carryAppliedThisFrame && lastGroundedHandle !== null) {
+        const carry = level.getPlatformDelta?.(lastGroundedHandle);
+        if (carry) {
+          desiredX += carry.x;
+          desiredY += carry.y;
+          desiredZ += carry.z;
+        }
+        carryAppliedThisFrame = true;
+      }
 
       characterController.computeColliderMovement(
         playerCollider,
@@ -628,7 +708,8 @@ export async function mountGameEngine(
         velocityY = 0;
       }
 
-      // Check collisions against moving machinery hazards or collapsing platforms
+      // Check collisions against moving machinery hazards or collapsing/moving platforms
+      groundedHandle = null;
       const numCols = characterController.numComputedCollisions();
       for (let i = 0; i < numCols; i++) {
         const colInfo = characterController.computedCollision(i);
@@ -642,6 +723,7 @@ export async function mountGameEngine(
           groundedHandle = hitCol.handle;
         }
       }
+      lastGroundedHandle = grounded ? groundedHandle : null;
 
       const moved = characterController.computedMovement();
       const cur = playerBody.translation();
@@ -716,9 +798,13 @@ export async function mountGameEngine(
           bestTimeMs = elapsedRunMs;
         }
         const prev = loadSaveData();
+        const cleared = prev.clearedSectors.includes(currentSector)
+          ? prev.clearedSectors
+          : [...prev.clearedSectors, currentSector];
         updateSaveData({
           bestTimeMs,
-          unlockedSector: Math.max(prev.unlockedSector, 2),
+          unlockedSector: Math.max(prev.unlockedSector, Math.min(SECTORS.length, currentSector + 1)),
+          clearedSectors: cleared,
           checkpointReached: false,
           sisterRescuedCount: prev.sisterRescuedCount + 1,
         });
@@ -800,6 +886,8 @@ export async function mountGameEngine(
 
   return {
     startNewRun,
+    selectSector,
+    playNextSector,
     skipIntro,
     restartFromCheckpoint,
     restartFullLevel,

@@ -25,6 +25,7 @@ export interface SisterRig {
   root: THREE.Group;
   skinnedMesh: THREE.SkinnedMesh;
   mixer: THREE.AnimationMixer;
+  helpSprite: THREE.Sprite;
   update: (dt: number) => void;
   dispose: () => void;
 }
@@ -706,6 +707,47 @@ export function createSisterModel(): SisterRig {
   const root = new THREE.Group();
   root.add(skinnedMesh);
 
+  // Floating 3D "HELP ME" Speech Badge directly above Sister's head
+  const helpCanvas = document.createElement('canvas');
+  helpCanvas.width = 256;
+  helpCanvas.height = 84;
+  const hCtx = helpCanvas.getContext('2d')!;
+  hCtx.fillStyle = 'rgba(15, 23, 42, 0.92)';
+  hCtx.beginPath();
+  hCtx.roundRect(8, 6, 240, 56, 14);
+  hCtx.fill();
+  hCtx.strokeStyle = '#ef4444';
+  hCtx.lineWidth = 5;
+  hCtx.stroke();
+  // Little speech triangle pointer
+  hCtx.fillStyle = 'rgba(15, 23, 42, 0.95)';
+  hCtx.beginPath();
+  hCtx.moveTo(116, 62);
+  hCtx.lineTo(140, 62);
+  hCtx.lineTo(128, 78);
+  hCtx.closePath();
+  hCtx.fill();
+
+  hCtx.fillStyle = '#fca5a5';
+  hCtx.font = 'bold 34px sans-serif';
+  hCtx.textAlign = 'center';
+  hCtx.textBaseline = 'middle';
+  hCtx.fillText('HELP ME', 128, 35);
+
+  const helpTex = new THREE.CanvasTexture(helpCanvas);
+  helpTex.colorSpace = THREE.SRGBColorSpace;
+  helpTex.needsUpdate = true;
+  const helpMat = new THREE.SpriteMaterial({
+    map: helpTex,
+    transparent: true,
+    depthWrite: false,
+  });
+  const helpSprite = new THREE.Sprite(helpMat);
+  helpSprite.scale.set(1.18, 0.39, 1);
+  helpSprite.position.set(0, 1.68, 0);
+  helpSprite.renderOrder = 6;
+  root.add(helpSprite);
+
   const mixer = new THREE.AnimationMixer(skinnedMesh);
   const waveClip = new THREE.AnimationClip('wave', 1.2, [
     new THREE.VectorKeyframeTrack('SisterHips.position', [0, 0.6, 1.2], [0, 0.68, 0, 0, 0.72, 0, 0, 0.68, 0]),
@@ -720,17 +762,24 @@ export function createSisterModel(): SisterRig {
   ]);
   mixer.clipAction(waveClip).play();
 
+  let helpPhase = 0;
+
   return {
     root,
     skinnedMesh,
     mixer,
+    helpSprite,
     update: (dt: number) => {
       mixer.update(dt);
+      helpPhase += dt * 3.8;
+      helpSprite.position.y = 1.68 + Math.sin(helpPhase) * 0.06;
     },
     dispose: () => {
       mixer.stopAllAction();
       finalGeo.dispose();
       materials.forEach((m) => m.dispose());
+      helpTex.dispose();
+      helpMat.dispose();
     },
   };
 }

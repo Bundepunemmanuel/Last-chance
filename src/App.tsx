@@ -14,6 +14,7 @@ import {
 } from 'lucide-react';
 import { ScreenOrientation } from '@capacitor/screen-orientation';
 import { mountGameEngine, type GameEngineHandle } from './game/engine';
+import { getSectorMeta, SECTORS } from './game/levels';
 import { loadSaveData, resetProgressSave } from './game/storage';
 import { useAppUpdater } from './game/updater';
 import type { GraphicsQuality, HudState, SaveData, VirtualInputState } from './game/types';
@@ -39,20 +40,28 @@ export default function App() {
   });
 
   const [save, setSave] = useState<SaveData>(() => loadSaveData());
-  const [hud, setHud] = useState<HudState>(() => ({
-    phase: 'title',
-    elapsedMs: 0,
-    deaths: 0,
-    checkpointActive: loadSaveData().checkpointReached,
-    fakeExitTriggered: false,
-    objectiveText: 'Cross the containment corridor — reach the exit.',
-    introSubtitle: null,
-    trapBannerText: null,
-    deathReason: null,
-    movementMode: 'idle',
-    fps: 30,
-    bestTimeMs: loadSaveData().bestTimeMs,
-  }));
+  const [hud, setHud] = useState<HudState>(() => {
+    const initial = loadSaveData();
+    const meta = getSectorMeta(initial.selectedSector);
+    return {
+      phase: 'title',
+      currentSector: meta.id,
+      totalSectors: SECTORS.length,
+      sectorTitle: meta.title,
+      elapsedMs: 0,
+      deaths: 0,
+      checkpointActive: initial.checkpointReached,
+      fakeExitTriggered: false,
+      objectiveText: `Cross ${meta.shortName} — reach the exit.`,
+      introSubtitle: null,
+      sisterQuote: null,
+      trapBannerText: null,
+      deathReason: null,
+      movementMode: 'idle',
+      fps: 30,
+      bestTimeMs: initial.bestTimeMs,
+    };
+  });
 
   const [engineReady, setEngineReady] = useState(false);
   const [showOsayemeSplash, setShowOsayemeSplash] = useState(true);
@@ -182,6 +191,17 @@ export default function App() {
     engineRef.current?.applySoundEnabled(next);
   };
 
+  const handleSelectSector = (sectorId: number) => {
+    engineRef.current?.selectSector(sectorId);
+    setSave(loadSaveData());
+  };
+
+  const handlePlayNextSector = () => {
+    setShowTitleSettings(false);
+    engineRef.current?.playNextSector();
+    setSave(loadSaveData());
+  };
+
   const handleStartNew = () => {
     setShowTitleSettings(false);
     engineRef.current?.startNewRun(false);
@@ -194,12 +214,19 @@ export default function App() {
     setSave(loadSaveData());
   };
 
+  const handleReturnToTitle = () => {
+    engineRef.current?.returnToTitle();
+    setSave(loadSaveData());
+  };
+
   const handleResetProgress = () => {
     const fresh = resetProgressSave();
     setSave(fresh);
     setShowTitleSettings(false);
-    engineRef.current?.returnToTitle();
+    engineRef.current?.selectSector(1);
   };
+
+  const activeSectorMeta = getSectorMeta(hud.currentSector);
 
   return (
     <div className="relative h-full w-full overflow-hidden bg-[#090b0f] text-slate-100">
@@ -351,7 +378,7 @@ export default function App() {
         <div className="pointer-events-none fixed inset-0 z-30 flex flex-col justify-between">
           <div className="safe-hud-top flex items-center justify-between bg-gradient-to-b from-[#06080c]/95 to-transparent pb-6">
             <span className="text-[11px] font-semibold tracking-[0.24em] text-amber-400">
-              OSAYEME · SECTOR 01 PROLOGUE
+              OSAYEME · SECTOR {activeSectorMeta.code} PROLOGUE
             </span>
           </div>
 
@@ -376,7 +403,7 @@ export default function App() {
           {/* Top Bar: Sector Context + Update Banner / Settings Button */}
           <div className="flex items-start justify-between gap-4">
             <p className="text-[11px] font-semibold tracking-widest text-amber-400">
-              SECTOR 01 · BIO-CONTAINMENT WING
+              SECTOR {activeSectorMeta.code} · {activeSectorMeta.title}
             </p>
 
             <div className="flex items-center gap-2">
@@ -417,30 +444,54 @@ export default function App() {
             </div>
           </div>
 
-          {/* Center-Left Hero Title & Primary Action */}
-          <div className="my-auto max-w-md py-2">
-            <h1 className="font-display text-4xl font-bold tracking-wider text-white sm:text-6xl">
+          {/* Center-Left Hero Title, Sector Strip & Primary Action */}
+          <div className="my-auto max-w-lg py-1">
+            <h1 className="font-display text-3xl font-bold tracking-wider text-white sm:text-5xl">
               LAST CHANCE
             </h1>
-            <p className="mt-2 text-xs leading-relaxed text-slate-300 sm:text-sm">
+            <p className="mt-1.5 text-xs leading-relaxed text-slate-300 sm:text-sm">
               Your younger sister is trapped beyond the containment corridor. Watch every floor seam, catwalk plate, and exit sign.
             </p>
 
-            <div className="mt-4 flex flex-wrap items-center gap-2.5 sm:mt-5">
+            {/* Compact 5-Sector Selector Strip */}
+            <div className="mt-2.5 flex flex-wrap gap-1.5">
+              {SECTORS.map((sec) => {
+                const isSelected = hud.currentSector === sec.id;
+                const isCleared = save.clearedSectors.includes(sec.id);
+                return (
+                  <button
+                    key={sec.id}
+                    type="button"
+                    onClick={() => handleSelectSector(sec.id)}
+                    className={`flex h-8 items-center gap-1 rounded-md border px-2.5 text-[11px] font-semibold transition-colors ${
+                      isSelected
+                        ? 'border-amber-400 bg-amber-500/20 text-amber-200'
+                        : 'border-slate-700/80 bg-[#0d131c]/85 text-slate-300 hover:border-slate-500 hover:text-white'
+                    }`}
+                  >
+                    <span className="font-mono-tabular font-bold">{sec.code}</span>
+                    <span>{sec.shortName}</span>
+                    {isCleared && <span className="text-emerald-400">✓</span>}
+                  </button>
+                );
+              })}
+            </div>
+
+            <div className="mt-3 flex flex-wrap items-center gap-2.5 sm:mt-4">
               <button
                 type="button"
                 onClick={handleStartNew}
-                className="flex h-12 items-center gap-2 rounded-lg bg-amber-500 px-6 font-display text-sm font-bold tracking-wider text-slate-950 transition-colors hover:bg-amber-400 focus-visible:outline-2 focus-visible:outline-amber-300"
+                className="flex h-11 items-center gap-2 rounded-lg bg-amber-500 px-5 font-display text-sm font-bold tracking-wider text-slate-950 transition-colors hover:bg-amber-400 focus-visible:outline-2 focus-visible:outline-amber-300 sm:h-12 sm:px-6"
               >
                 <Play className="h-4 w-4 fill-current" />
-                <span>START MISSION</span>
+                <span>START SECTOR {activeSectorMeta.code}</span>
               </button>
 
               {save.checkpointReached && (
                 <button
                   type="button"
                   onClick={handleContinueCheckpoint}
-                  className="flex h-12 items-center gap-2 rounded-lg border border-emerald-500/60 bg-emerald-950/70 px-4 text-xs font-semibold text-emerald-200 transition-colors hover:bg-emerald-900/75 sm:text-sm"
+                  className="flex h-11 items-center gap-2 rounded-lg border border-emerald-500/60 bg-emerald-950/70 px-4 text-xs font-semibold text-emerald-200 transition-colors hover:bg-emerald-900/75 sm:h-12 sm:text-sm"
                 >
                   <Flag className="h-4 w-4" />
                   <span>Resume Checkpoint</span>
@@ -563,7 +614,7 @@ export default function App() {
             <div className="space-y-3">
               <div>
                 <h2 className="font-display text-xl font-bold tracking-wide text-white">PAUSED</h2>
-                <p className="text-xs text-slate-400">Sector 01 · {formatTime(hud.elapsedMs)}</p>
+                <p className="text-xs text-slate-400">Sector {activeSectorMeta.code} · {formatTime(hud.elapsedMs)}</p>
               </div>
 
               <div>
@@ -634,7 +685,7 @@ export default function App() {
                 </button>
                 <button
                   type="button"
-                  onClick={() => engineRef.current?.returnToTitle()}
+                  onClick={handleReturnToTitle}
                   className="h-10 rounded-lg border border-slate-700 bg-slate-900 text-xs font-semibold text-slate-300 hover:text-white"
                 >
                   Main Menu
@@ -655,12 +706,24 @@ export default function App() {
                   <CheckCircle2 className="h-6 w-6" />
                 </div>
                 <div>
-                  <h2 className="font-display text-2xl font-bold tracking-wider text-white">SECTOR 01 CLEARED</h2>
-                  <p className="text-xs text-emerald-300">Airlock B-2 Reached</p>
+                  <h2 className="font-display text-2xl font-bold tracking-wider text-white">
+                    SECTOR {activeSectorMeta.code} CLEARED
+                  </h2>
+                  <p className="text-xs text-emerald-300">{activeSectorMeta.airlockLabel} Reached</p>
                 </div>
               </div>
-              <p className="mt-3 text-xs leading-relaxed text-slate-300">
-                You bypassed the decoy bulkhead and reached your sister at Airlock B-2. Deeper sectors await ahead.
+
+              {hud.sisterQuote && (
+                <div className="mt-3 rounded-lg border border-rose-500/45 bg-rose-950/35 px-3 py-2">
+                  <p className="text-[10px] font-bold tracking-widest text-rose-300 uppercase">Sister</p>
+                  <p className="mt-0.5 text-xs font-semibold italic text-rose-100 sm:text-sm">
+                    &ldquo;{hud.sisterQuote}&rdquo;
+                  </p>
+                </div>
+              )}
+
+              <p className="mt-2.5 text-xs leading-relaxed text-slate-300">
+                {activeSectorMeta.victorySummary}
               </p>
             </div>
 
@@ -684,17 +747,27 @@ export default function App() {
                 </div>
               </div>
 
-              <div className="flex gap-2.5">
+              <div className="flex gap-2">
+                {hud.currentSector < hud.totalSectors ? (
+                  <button
+                    type="button"
+                    onClick={handlePlayNextSector}
+                    className="h-11 flex-1 rounded-lg bg-emerald-500 font-display text-sm font-bold tracking-wider text-slate-950 hover:bg-emerald-400"
+                  >
+                    NEXT SECTOR
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={handleStartNew}
+                    className="h-11 flex-1 rounded-lg bg-emerald-500 font-display text-sm font-bold tracking-wider text-slate-950 hover:bg-emerald-400"
+                  >
+                    REPLAY
+                  </button>
+                )}
                 <button
                   type="button"
-                  onClick={handleStartNew}
-                  className="h-11 flex-1 rounded-lg bg-emerald-500 font-display text-sm font-bold tracking-wider text-slate-950 hover:bg-emerald-400"
-                >
-                  PLAY AGAIN
-                </button>
-                <button
-                  type="button"
-                  onClick={() => engineRef.current?.returnToTitle()}
+                  onClick={handleReturnToTitle}
                   className="h-11 flex-1 rounded-lg border border-slate-600 bg-slate-800 text-xs font-semibold text-slate-200 hover:bg-slate-700"
                 >
                   MAIN MENU

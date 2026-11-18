@@ -7,6 +7,8 @@ export type MovementMode = 'idle' | 'walk' | 'run' | 'air';
 export interface SaveData {
   version: number;
   unlockedSector: number;
+  selectedSector: number;
+  clearedSectors: number[];
   bestTimeMs: number | null;
   totalDeaths: number;
   totalRuns: number;
@@ -19,12 +21,16 @@ export interface SaveData {
 
 export interface HudState {
   phase: GamePhase;
+  currentSector: number;
+  totalSectors: number;
+  sectorTitle: string;
   elapsedMs: number;
   deaths: number;
   checkpointActive: boolean;
   fakeExitTriggered: boolean;
   objectiveText: string;
   introSubtitle: string | null;
+  sisterQuote: string | null;
   trapBannerText: string | null;
   deathReason: string | null;
   movementMode: MovementMode;
