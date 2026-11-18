@@ -63,6 +63,7 @@ export interface LevelInstance {
   introSisterRig: SisterRig;
   emergencyLights: THREE.PointLight[];
   updateAmbient: (dt: number) => void;
+  setShutterProgress: (progress: number) => void;
   update: (
     dt: number,
     elapsed: number,
@@ -953,6 +954,11 @@ export function buildSectorOneLevel(
     vaultWheel.rotation.z += dt * 0.45;
   };
 
+  const setShutterProgress = (progress: number) => {
+    shutterProgress = THREE.MathUtils.clamp(progress, 0, 1);
+    blastShutter.position.y = THREE.MathUtils.lerp(shutterOpenY, shutterClosedY, shutterProgress);
+  };
+
   const update: LevelInstance['update'] = (
     dt,
     elapsed,
@@ -1169,6 +1175,7 @@ export function buildSectorOneLevel(
     introSisterRig,
     emergencyLights,
     updateAmbient,
+    setShutterProgress,
     update,
     resetTraps,
     activateCheckpointVisuals,

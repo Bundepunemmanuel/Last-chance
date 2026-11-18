@@ -32,6 +32,7 @@ function detectSoftwareWebGL(): boolean {
 
 export interface GameEngineHandle {
   startNewRun: (fromCheckpoint?: boolean) => void;
+  skipIntro: () => void;
   restartFromCheckpoint: () => void;
   restartFullLevel: () => void;
   setPaused: (paused: boolean) => void;
@@ -234,6 +235,9 @@ export async function mountGameEngine(
   let deathReason: string | null = null;
   let trapBannerText: string | null = null;
   let trapBannerTimer = 0;
+  let introTimer = 0;
+  let introBeepTriggered = false;
+  let introSubtitle: string | null = null;
   let footstepTimer = 0;
   let movementMode: MovementMode = 'idle';
   let shakeIntensity = 0;
@@ -242,6 +246,10 @@ export async function mountGameEngine(
   const keys = new Set<string>();
   const onKeyDown = (e: KeyboardEvent) => {
     keys.add(e.code);
+    if (phase === 'intro' && (e.code === 'Space' || e.code === 'Enter')) {
+      skipIntro();
+      return;
+    }
     if (e.code === 'KeyR' && (phase === 'playing' || phase === 'dead')) {
       restartFromCheckpoint();
     } else if ((e.code === 'Escape' || e.code === 'KeyP') && (phase === 'playing' || phase === 'paused')) {
@@ -277,6 +285,7 @@ export async function mountGameEngine(
       checkpointActive,
       fakeExitTriggered: level.fakeExitTriggered,
       objectiveText: objective,
+      introSubtitle,
       trapBannerText,
       deathReason,
       movementMode,
@@ -310,22 +319,38 @@ export async function mountGameEngine(
     pushHud(currentFps);
   };
 
+  const skipIntro = () => {
+    if (phase !== 'intro') return;
+    introSubtitle = null;
+    level.setShutterProgress(1);
+    camera.position.set(_playerPos.x * 0.72, Math.max(1.2, _playerPos.y + 3.45), _playerPos.z + 6.3);
+    _currentLookAt.set(_playerPos.x * 0.85, _playerPos.y + 1.05, _playerPos.z - 2.6);
+    camera.lookAt(_currentLookAt);
+    phase = 'playing';
+    pushHud(currentFps);
+  };
+
   const startNewRun = (fromCheckpoint = false) => {
     soundEngine.unlock();
     level.resetTraps();
+    deathReason = null;
+    trapBannerText = null;
+    trapBannerTimer = 0;
     if (!fromCheckpoint) {
       checkpointActive = false;
       elapsedRunMs = 0;
       runDeaths = 0;
       updateSaveData({ checkpointReached: false, totalRuns: loadSaveData().totalRuns + 1 });
       placePlayerAt(level.spawnPos);
+      introTimer = 0;
+      introBeepTriggered = false;
+      introSubtitle = "Stay behind the glass — I'm coming to get you!";
+      phase = 'intro';
     } else {
+      introSubtitle = null;
       placePlayerAt(checkpointActive ? level.checkpointPos : level.spawnPos);
+      phase = 'playing';
     }
-    deathReason = null;
-    trapBannerText = null;
-    trapBannerTimer = 0;
-    phase = 'playing';
     pushHud(currentFps);
   };
 
@@ -336,12 +361,25 @@ export async function mountGameEngine(
     deathReason = null;
     trapBannerText = null;
     trapBannerTimer = 0;
+    introSubtitle = null;
     phase = 'playing';
     pushHud(currentFps);
   };
 
   const restartFullLevel = () => {
-    startNewRun(false);
+    soundEngine.unlock();
+    level.resetTraps();
+    checkpointActive = false;
+    elapsedRunMs = 0;
+    runDeaths = 0;
+    updateSaveData({ checkpointReached: false, totalRuns: loadSaveData().totalRuns + 1 });
+    placePlayerAt(level.spawnPos);
+    deathReason = null;
+    trapBannerText = null;
+    trapBannerTimer = 0;
+    introSubtitle = null;
+    phase = 'playing';
+    pushHud(currentFps);
   };
 
   const setPaused = (paused: boolean) => {
@@ -431,6 +469,43 @@ export async function mountGameEngine(
       camera.position.z = THREE.MathUtils.damp(camera.position.z, _desiredCamPos.z, 4, dt);
       _currentLookAt.lerp(_desiredLookAt, 1 - Math.exp(-5 * dt));
       camera.lookAt(_currentLookAt);
+      return;
+    }
+
+    if (phase === 'intro') {
+      introTimer += dt;
+      playerRig.updateAnimation(dt, 0, 6.6, true, 0, false);
+      level.updateAmbient(dt);
+
+      if (introTimer < 2.3) {
+        introSubtitle = "Wait behind the glass — I'm coming to get you!";
+        _desiredCamPos.set(-1.6, 1.55, 0.2 - introTimer * 0.55);
+        _desiredLookAt.set(-4.65, 1.25, -1.6);
+      } else if (introTimer < 4.4) {
+        if (!introBeepTriggered) {
+          introBeepTriggered = true;
+          soundEngine.playSpikeWarning();
+        }
+        level.setShutterProgress((introTimer - 2.3) / 1.5);
+        introSubtitle = 'Containment lockdown triggered — the blast door is sealing!';
+        _desiredCamPos.set(0.85, 2.25, 2.6);
+        _desiredLookAt.set(-1.1, 1.2, -0.4);
+      } else {
+        level.setShutterProgress(1);
+        introSubtitle = "Don't trust a single floor plate. Reach Airlock B-2!";
+        _desiredCamPos.set(_playerPos.x * 0.72, Math.max(1.2, _playerPos.y + 3.45), _playerPos.z + 6.3);
+        _desiredLookAt.set(_playerPos.x * 0.85, _playerPos.y + 1.05, _playerPos.z - 2.6);
+      }
+
+      camera.position.x = THREE.MathUtils.damp(camera.position.x, _desiredCamPos.x, 4.5, dt);
+      camera.position.y = THREE.MathUtils.damp(camera.position.y, _desiredCamPos.y, 4.5, dt);
+      camera.position.z = THREE.MathUtils.damp(camera.position.z, _desiredCamPos.z, 4.5, dt);
+      _currentLookAt.lerp(_desiredLookAt, 1 - Math.exp(-5.5 * dt));
+      camera.lookAt(_currentLookAt);
+
+      if (introTimer >= 6.2) {
+        skipIntro();
+      }
       return;
     }
 
@@ -725,6 +800,7 @@ export async function mountGameEngine(
 
   return {
     startNewRun,
+    skipIntro,
     restartFromCheckpoint,
     restartFullLevel,
     setPaused,

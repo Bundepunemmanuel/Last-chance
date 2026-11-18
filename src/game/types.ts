@@ -1,6 +1,6 @@
 export type GraphicsQuality = 'low' | 'medium' | 'high';
 
-export type GamePhase = 'title' | 'playing' | 'paused' | 'dead' | 'victory';
+export type GamePhase = 'title' | 'intro' | 'playing' | 'paused' | 'dead' | 'victory';
 
 export type MovementMode = 'idle' | 'walk' | 'run' | 'air';
 
@@ -24,6 +24,7 @@ export interface HudState {
   checkpointActive: boolean;
   fakeExitTriggered: boolean;
   objectiveText: string;
+  introSubtitle: string | null;
   trapBannerText: string | null;
   deathReason: string | null;
   movementMode: MovementMode;

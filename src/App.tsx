@@ -46,6 +46,7 @@ export default function App() {
     checkpointActive: loadSaveData().checkpointReached,
     fakeExitTriggered: false,
     objectiveText: 'Cross the containment corridor — reach the exit.',
+    introSubtitle: null,
     trapBannerText: null,
     deathReason: null,
     movementMode: 'idle',
@@ -54,11 +55,21 @@ export default function App() {
   }));
 
   const [engineReady, setEngineReady] = useState(false);
+  const [showOsayemeSplash, setShowOsayemeSplash] = useState(true);
   const [contextLost, setContextLost] = useState(false);
   const [isPortraitMobile, setIsPortraitMobile] = useState(false);
   const [showTitleSettings, setShowTitleSettings] = useState(false);
   const [objectiveVisible, setObjectiveVisible] = useState(true);
   const lastObjectiveRef = useRef<string>('');
+
+  // Hold OSAYEME studio intro briefly so users clearly see the studio intro on launch
+  useEffect(() => {
+    if (!engineReady) return;
+    const timer = window.setTimeout(() => {
+      setShowOsayemeSplash(false);
+    }, 1700);
+    return () => window.clearTimeout(timer);
+  }, [engineReady]);
 
   const {
     appUpdateInfo,
@@ -195,12 +206,26 @@ export default function App() {
       {/* Dedicated WebGL Canvas Container */}
       <div ref={canvasHostRef} className="fixed inset-0 z-0 h-full w-full" />
 
-      {/* Initial Loader Scrim */}
-      {!engineReady && (
-        <div className="fixed inset-0 z-50 flex flex-col items-center justify-center bg-[#090b0f] px-6 text-center">
-          <h1 className="font-display text-4xl font-bold tracking-wider text-slate-100">LAST CHANCE</h1>
-          <p className="mt-2 text-sm text-slate-400">Initializing containment sector...</p>
-        </div>
+      {/* OSAYEME Studio Boot Intro (replaces initializing screen) */}
+      {(!engineReady || showOsayemeSplash) && (
+        <button
+          type="button"
+          onClick={() => {
+            if (engineReady) setShowOsayemeSplash(false);
+          }}
+          className="fixed inset-0 z-50 flex flex-col items-center justify-center bg-[#090b0f] px-6 text-center focus:outline-none"
+        >
+          <span className="font-display text-4xl font-bold tracking-[0.28em] text-white sm:text-5xl">
+            OSAYEME
+          </span>
+          <span className="mt-3 h-0.5 w-20 bg-amber-500/85" />
+          <p className="mt-3 text-[11px] font-semibold tracking-[0.34em] text-amber-400/90">
+            PRESENTS
+          </p>
+          {engineReady && (
+            <span className="mt-6 text-[11px] tracking-wider text-slate-500">Tap to continue</span>
+          )}
+        </button>
       )}
 
       {/* WebGL Context Lost Recovery */}
@@ -321,8 +346,32 @@ export default function App() {
         <TouchControls inputRef={virtualInputRef} movementMode={hud.movementMode} />
       )}
 
+      {/* 3D Story Intro Cutscene Overlay (Subtitles + Skip Intro) */}
+      {hud.phase === 'intro' && (
+        <div className="pointer-events-none fixed inset-0 z-30 flex flex-col justify-between">
+          <div className="safe-hud-top flex items-center justify-between bg-gradient-to-b from-[#06080c]/95 to-transparent pb-6">
+            <span className="text-[11px] font-semibold tracking-[0.24em] text-amber-400">
+              OSAYEME · SECTOR 01 PROLOGUE
+            </span>
+          </div>
+
+          <div className="safe-controls-bottom flex items-end justify-between gap-4 bg-gradient-to-t from-[#06080c]/95 via-[#06080c]/75 to-transparent pt-8">
+            <p className="hud-text-shadow max-w-xl text-sm font-medium text-slate-100 sm:text-base">
+              {hud.introSubtitle}
+            </p>
+            <button
+              type="button"
+              onClick={() => engineRef.current?.skipIntro()}
+              className="pointer-events-auto flex h-11 shrink-0 items-center gap-1.5 rounded-lg border border-amber-500/60 bg-[#0b1017]/90 px-4 text-xs font-bold tracking-wider text-amber-300 transition-colors hover:bg-amber-500 hover:text-slate-950"
+            >
+              <span>SKIP INTRO</span>
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* Landscape-Optimized Title Screen (Fits 360px+ height cleanly) */}
-      {hud.phase === 'title' && engineReady && !showTitleSettings && (
+      {hud.phase === 'title' && engineReady && !showOsayemeSplash && !showTitleSettings && (
         <div className="safe-screen-pad fixed inset-0 z-30 flex flex-col justify-between bg-gradient-to-r from-[#090b0f]/94 via-[#090b0f]/68 to-transparent">
           {/* Top Bar: Sector Context + Update Banner / Settings Button */}
           <div className="flex items-start justify-between gap-4">
