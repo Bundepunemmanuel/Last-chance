@@ -1,10 +1,12 @@
 // 100% Offline Meme Sound Engine (Real Meme Clips + Procedural Web Audio Fallbacks)
 
-type MemeClipKey = 'meme_ahh' | 'meme_faaah';
+type MemeClipKey = 'meme_ahh' | 'meme_faaah' | 'meme_glop' | 'meme_undertaker';
 
 const MEME_CLIP_PATHS: Record<MemeClipKey, string> = {
   meme_ahh: '/audio/meme_ahh.mp3',
   meme_faaah: '/audio/meme_faaah.mp3',
+  meme_glop: '/audio/meme_glop.mp3',
+  meme_undertaker: '/audio/meme_undertaker.mp3',
 };
 
 class SoundEngine {
@@ -50,7 +52,12 @@ class SoundEngine {
     }
   }
 
-  private playDecodedClip(key: MemeClipKey, volume = 0.85, playbackRate = 1.0): boolean {
+  private playDecodedClip(
+    key: MemeClipKey,
+    volume = 0.85,
+    playbackRate = 1.0,
+    maxDurationSec?: number,
+  ): boolean {
     const ctx = this.ensureContext();
     if (!ctx) return false;
     const buffer = this.decodedBuffers.get(key);
@@ -62,16 +69,24 @@ class SoundEngine {
       return false;
     }
 
+    const now = ctx.currentTime;
     const src = ctx.createBufferSource();
     src.buffer = buffer;
-    src.playbackRate.setValueAtTime(playbackRate, ctx.currentTime);
+    src.playbackRate.setValueAtTime(playbackRate, now);
 
     const gain = ctx.createGain();
-    gain.gain.setValueAtTime(volume, ctx.currentTime);
+    gain.gain.setValueAtTime(volume, now);
+    if (maxDurationSec && maxDurationSec > 0.1) {
+      gain.gain.setValueAtTime(volume, now + Math.max(0.05, maxDurationSec - 0.08));
+      gain.gain.exponentialRampToValueAtTime(0.001, now + maxDurationSec);
+    }
 
     src.connect(gain);
     gain.connect(ctx.destination);
-    src.start(ctx.currentTime);
+    src.start(now);
+    if (maxDurationSec && maxDurationSec > 0.1) {
+      src.stop(now + maxDurationSec + 0.02);
+    }
     return true;
   }
 
@@ -280,8 +295,20 @@ class SoundEngine {
     osc.stop(now + 0.18);
   }
 
-  // Cartoon panicky slide-whistle wobble on collapsing catwalk
+  // Plays Undertaker Bell during 3D Story Intro when blast shutter slams shut!
+  public playIntroLockdown(): void {
+    if (this.playDecodedClip('meme_undertaker', 0.9, 1.0)) {
+      return;
+    }
+    this.playSpikeWarning();
+  }
+
+  // Frantic glopglopglop panic on collapsing catwalk (with slide-whistle fallback)
   public playPlatformCreak(): void {
+    if (this.playDecodedClip('meme_glop', 0.78, 1.08, 0.8)) {
+      return;
+    }
+
     const ctx = this.ensureContext();
     if (!ctx) return;
     const now = ctx.currentTime;
@@ -302,8 +329,12 @@ class SoundEngine {
     osc.stop(now + 0.37);
   }
 
-  // "ERRRNT!" Game-show wrong buzzer + Vine Boom on Fake Exit Decoy
+  // Undertaker Bell doom gong + buzzer when reaching the Fake Exit Decoy!
   public playFakeExitAlarm(): void {
+    if (this.playDecodedClip('meme_undertaker', 0.95, 1.0)) {
+      return;
+    }
+
     const ctx = this.ensureContext();
     if (!ctx) return;
     const now = ctx.currentTime;
@@ -348,21 +379,28 @@ class SoundEngine {
     });
   }
 
-  // Plays user's "FAAAH!" meme scream (with Vine Boom punch) on Death, alternating meme clips!
+  // Rotates your uploaded meme SFX cleanly on Death:
+  // 0: FAAAH! + Vine Boom | 1: Undertaker Bell | 2: Anime Ahh + Vine Boom | 3: GlopGlopGlop
   public playDeath(): void {
     const ctx = this.ensureContext();
     if (!ctx) return;
     const now = ctx.currentTime;
-    const mode = this.deathVariant % 3;
+    const mode = this.deathVariant % 4;
     this.deathVariant += 1;
 
-    // Prioritize the uploaded "FAAAH!" meme on most deaths (modes 0 & 1) and "ahh" on mode 2
-    if (mode !== 2 && this.playDecodedClip('meme_faaah', 0.92, mode === 1 ? 0.95 : 1.02)) {
+    if (mode === 0 && this.playDecodedClip('meme_faaah', 0.92, 1.0)) {
       this.triggerVineBoom(ctx, now, 0.2);
+      return;
+    }
+    if (mode === 1 && this.playDecodedClip('meme_undertaker', 0.95, 1.0)) {
       return;
     }
     if (mode === 2 && this.playDecodedClip('meme_ahh', 0.92, 1.0)) {
       this.triggerVineBoom(ctx, now + 0.08, 0.24);
+      return;
+    }
+    if (mode === 3 && this.playDecodedClip('meme_glop', 0.85, 1.02, 1.25)) {
+      this.triggerVineBoom(ctx, now, 0.18);
       return;
     }
 

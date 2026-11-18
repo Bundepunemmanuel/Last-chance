@@ -484,7 +484,7 @@ export async function mountGameEngine(
       } else if (introTimer < 4.4) {
         if (!introBeepTriggered) {
           introBeepTriggered = true;
-          soundEngine.playSpikeWarning();
+          soundEngine.playIntroLockdown();
         }
         level.setShutterProgress((introTimer - 2.3) / 1.5);
         introSubtitle = 'Containment lockdown triggered — the blast door is sealing!';
